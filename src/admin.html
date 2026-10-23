@@ -204,6 +204,7 @@ const PAGES = {
 	overview: { icon: "monitoring", title: "Overview" },
 	reports: { icon: "flag", title: "Reports" },
 	appeals: { icon: "gavel", title: "Appeals", needs: "appeals" },
+	bulkStrike: { icon: "swords", title: "Bulk strike", needs: "bulkStrike" },
 	users: { icon: "group", title: "Users" },
 	orgs: { icon: "domain", title: "Organisations" },
 	posts: { icon: "chat", title: "Posts" },
@@ -233,7 +234,7 @@ const PAGES = {
 
 const GROUPS = [
 	[null, ["overview"]],
-	["Moderation", ["reports", "appeals", "automod", "posts", "articles", "media"]],
+	["Moderation", ["reports", "appeals", "bulkStrike", "automod", "posts", "articles", "media"]],
 	["People", ["users", "orgs", "invites", "badges"]],
 	["Content", ["stickers", "hashflags", "topics", "cards"]],
 	["Instance", ["settings", "switches", "money", "email", "apps", "oauth", "federation"]],
@@ -428,6 +429,38 @@ const RENDER = {
 			: '<div class="empty">No articles yet.</div>') + "</div>";
 		main.querySelectorAll("[data-article]").forEach((b) => b.onclick = () =>
 			act(() => api("setArticleVisibility", { id: b.dataset.article, hidden: b.dataset.hidden === "true" }), b.dataset.hidden === "true" ? "Article hidden" : "Article shown again").then(route));
+	},
+
+	async bulkStrike(main) {
+		main.innerHTML = "<h1>Bulk strike</h1>" +
+			'<p class="dim small">One strike for many accounts at once: an alt chain, a raid, a ban evader\'s new accounts. Each account gets the message below as its own strike, and strikes count toward suspension on the usual ladder (see Automod). Accounts that staff rank protects are skipped, with the reason shown. Ticking accounts on the Users page and pressing Strike there does the same thing by id.</p>' +
+			(can("bulkStrike") ?
+			'<div class="field"><label>Handles, one per line</label><textarea id="bsHandles" rows="6" placeholder="@handle1&#10;@handle2"></textarea></div>' +
+			'<div class="field"><label>What they\'ll read</label><textarea id="bsBody" maxlength="2000" placeholder="Why they\'re getting this strike"></textarea></div>' +
+			'<label class="row" style="margin:6px 0"><input type="checkbox" id="bsEscalate" checked> Strikes count toward suspension</label>' +
+			(can("heldIdentities") ? '<label class="row" style="margin:6px 0"><input type="checkbox" id="bsAlts"> Also strike accounts seen from the same addresses (alts)</label>' : "") +
+			'<div class="row"><button class="btn primary" id="bsGo">Strike them all</button></div><div id="bsOut"></div>' : '<p class="dim small">Requires permission to send strikes.</p>');
+		if (!$("#bsGo")) return;
+		$("#bsGo").onclick = async () => {
+			const handles = $("#bsHandles").value.split(/[\s,]+/).filter(Boolean);
+			if (!handles.length) return;
+			if (!(await ask("Give " + handles.length + " accounts" + ($("#bsAlts")?.checked ? " and their alts" : "") + " a strike?"))) return;
+			$("#bsGo").disabled = true;
+			await act(async () => {
+				const { results, missing } = await api("bulkStrike", { handles, body: $("#bsBody").value, escalate: $("#bsEscalate").checked, include_alts: !!$("#bsAlts")?.checked });
+				const words = (r) => !r.ok ? (r.error ? "error: " : "skipped: ") + r.why
+					: r.outcome === undefined ? "strike sent (doesn't count toward suspension)"
+					: r.outcome === "staff" ? "staff account: message sent, no sanction"
+					: r.outcome === "warning" ? "strike " + r.strikes + ": warning"
+					: r.outcome === "second_chance" ? "strike " + r.strikes + ": second chance, not suspended"
+					: r.outcome === "permanent" ? "strike " + r.strikes + ": suspended for good"
+					: "strike " + r.strikes + ": suspended for " + r.hours + " hours";
+				$("#bsOut").innerHTML = '<div class="list" style="margin-top:14px">' +
+					results.map((r) => '<p><a href="#user/' + esc(r.id) + '">@' + esc(r.screen_name || r.id) + '</a> <span class="dim small">' + esc(words(r)) + "</span></p>").join("") +
+					(missing.length ? '<p class="dim small">No account named: ' + missing.map((m) => "@" + esc(m)).join(", ") + ".</p>" : "") + "</div>";
+			});
+			$("#bsGo").disabled = false;
+		};
 	},
 
 	async media(main) {
@@ -935,8 +968,12 @@ const RENDER = {
 			'<select id="status"><option value="">Any standing</option><option>active</option><option>restricted</option><option>limited</option><option>suspended</option></select>' +
 			HOME_SELECT +
 			'<label class="row small"><input type="checkbox" id="staff"> Staff only</label></div>' +
-			(can("bulkStatus") ? '<div class="bar" id="bulk" hidden><span class="small" id="picked"></span>' +
-				[["active", "Reinstate", ""], ["restricted", "Restrict", ""], ["limited", "Limit", ""], ["suspended", "Suspend", " danger"]].map(([s, l, c]) => '<button class="btn' + c + '" data-bulk="' + s + '">' + l + "</button>").join("") + "</div>" : "") +
+			(can("bulkStatus") || can("bulkStrike") ? '<div class="bar" id="bulk" hidden><span class="small" id="picked"></span>' +
+				(can("bulkStatus") ? [["active", "Reinstate", ""], ["restricted", "Restrict", ""], ["limited", "Limit", ""], ["suspended", "Suspend", " danger"]].map(([s, l, c]) => '<button class="btn' + c + '" data-bulk="' + s + '">' + l + "</button>").join("") : "") +
+				(can("bulkStrike") ? '<button class="btn danger" id="bulkStrikeBtn">Strike</button>' : "") + "</div>" : "") +
+			(can("bulkStrike") ? '<div class="box" id="bulkStrikeBox" hidden><div class="field"><label>Strike message for the ticked accounts</label><textarea id="bulkStrikeBody" maxlength="2000" placeholder="Why they\'re getting this strike"></textarea></div>' +
+				'<label class="row" style="margin:6px 0"><input type="checkbox" id="bulkStrikeEscalate" checked> Strikes count toward suspension</label>' +
+				'<div class="row"><button class="btn primary" id="bulkStrikeSend">Send strikes</button><button class="btn" id="bulkStrikeCancel">Cancel</button></div><div id="bulkStrikeOut"></div></div>' : "") +
 			'<p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
 			'<div class="row" style="margin-top:16px"><button class="btn" id="more" hidden>Show more</button></div>';
 		const picked = () => [...main.querySelectorAll("[data-pick]:checked")].map((c) => c.dataset.pick);
@@ -947,7 +984,7 @@ const RENDER = {
 			const q = { q: $("#q").value, status: $("#status").value, staff: $("#staff").checked, home: $("#home").value };
 			const { users, total } = await api("users", more === true ? { ...q, offset: shown.length } : more === "same" ? { ...q, limit: Math.max(shown.length, 50) } : q);
 			shown = more === true ? shown.concat(users) : users;
-			$("#list").innerHTML = shown.length ? userTable(shown, false, can("bulkStatus")) : '<div class="empty">No accounts match.</div>';
+			$("#list").innerHTML = shown.length ? userTable(shown, false, can("bulkStatus") || can("bulkStrike")) : '<div class="empty">No accounts match.</div>';
 			keep.forEach((id) => { const c = main.querySelector('[data-pick="' + id + '"]'); if (c) c.checked = true; });
 			$("#total").textContent = total + (total === 1 ? " account" : " accounts") + (shown.length < total ? ", showing " + shown.length : "");
 			$("#more").hidden = shown.length >= total;
@@ -965,6 +1002,22 @@ const RENDER = {
 			if (b.dataset.bulk === "suspended" && !(await ask("Suspend " + ids.length + " accounts?"))) return;
 			act(() => api("bulkStatus", { ids, status: b.dataset.bulk }), "Standing changed").then(() => load("same"));
 		});
+		if ($("#bulkStrikeBtn")) $("#bulkStrikeBtn").onclick = () => { $("#bulkStrikeBox").hidden = false; $("#bulkStrikeBody").focus(); };
+		if ($("#bulkStrikeCancel")) $("#bulkStrikeCancel").onclick = () => { $("#bulkStrikeBox").hidden = true; };
+		if ($("#bulkStrikeSend")) $("#bulkStrikeSend").onclick = async () => {
+			const ids = picked();
+			if (!ids.length) return;
+			if (!(await ask("Give " + ids.length + " accounts a strike?"))) return;
+			$("#bulkStrikeSend").disabled = true;
+			await act(async () => {
+				const { results } = await api("bulkStrike", { ids, body: $("#bulkStrikeBody").value, escalate: $("#bulkStrikeEscalate").checked });
+				const struck = results.filter((r) => r.ok || r.delivered), skipped = results.filter((r) => !r.ok && !r.error), errors = results.filter((r) => r.error);
+				$("#bulkStrikeOut").innerHTML = '<p class="small" style="margin-top:10px">' + struck.length + (struck.length === 1 ? " account" : " accounts") + " struck." +
+					(skipped.length ? " Skipped: " + skipped.map((r) => "@" + esc(r.screen_name || r.id) + " (" + esc(r.why) + ")").join(", ") + "." : "") +
+					(errors.length ? " Errors: " + errors.map((r) => "@" + esc(r.screen_name || r.id) + " (" + esc(r.why) + ")").join(", ") + "." : "") + "</p>";
+			});
+			$("#bulkStrikeSend").disabled = false;
+		};
 		let t;
 		$("#q").oninput = () => { clearTimeout(t); t = setTimeout(() => load(false), 250); };
 		$("#status").onchange = () => load(false);
@@ -1322,7 +1375,7 @@ const RENDER = {
 	async audit(main, filter = {}) {
 		const { entries } = await api("audit", filter);
 		main.innerHTML = '<h1>Audit log</h1><div class="bar"><input id="auditWho" placeholder="@handle" value="' + esc(filter.target || "") + '">' +
-			'<select id="auditAction"><option value="">Every action</option>' + ["automod_strike", "automod_second_chance", "escalate", "expire_sanction", "auto_suspend_name", "temporary_status", "set_status", "bulk_status", "send_staff_message", "revoke_strike", "resolve_appeal", "save_automod", "set_role", "set_staff_permissions"]
+			'<select id="auditAction"><option value="">Every action</option>' + ["automod_strike", "automod_second_chance", "escalate", "expire_sanction", "auto_suspend_name", "temporary_status", "set_status", "bulk_status", "send_staff_message", "revoke_strike", "bulk_strike", "resolve_appeal", "save_automod", "set_role", "set_staff_permissions"]
 				.map((a) => '<option value="' + a + '"' + (filter.action === a ? " selected" : "") + ">" + a.replace(/_/g, " ") + "</option>").join("") + "</select>" +
 			'<label class="row"><input type="checkbox" id="auditAuto"' + (filter.automatic ? " checked" : "") + '> Automatic only</label><button class="btn" id="auditGo">Filter</button></div><div class="scroll">' + (entries.length
 			? '<table class="table"><tr><th>When</th><th>Who</th><th>Did</th><th>To</th><th>Details</th></tr>' +
