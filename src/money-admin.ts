@@ -11,14 +11,6 @@ import { allows } from "./staff-permissions";
 import { shopItems } from "./money-shop";
 import { BADGE_TYPES, sniffImage } from "./media";
 
-// Another active local admin or moderator who could review a listing this
-// account made. Without one, a lone admin approves their own listings.
-async function otherReviewer(userId: string, tx: typeof sql = sql) {
-	const [r] = await tx`select 1 from users where id <> ${userId}::bigint and instance is null and role in ('admin', 'moderator')
-		and status <> 'suspended' and deactivated_at is null limit 1`;
-	return !!r;
-}
-
 // dollars typed in the panel ("100", "0.50") as cents, within limits
 function cents(v: unknown, what: string, min: number, max: number) {
 	const c = typeof v === "number" ? Math.round(v * 100) : parseAmount(String(v ?? ""));
@@ -49,7 +41,7 @@ export const moneyActions: Record<string, Action> = {
 				from money_transfers t join users s on s.id = t.sender_id join users r on r.id = t.recipient_id
 				${q ? sql`where lower(s.screen_name) = lower(${q}) or lower(r.screen_name) = lower(${q})` : sql``}
 				order by t.id desc limit 50`;
-			const [badges, items, pendingOrders, remotePending, [remotePendingCount], remoteItems, selfReview] = await Promise.all([
+			const [badges, items, pendingOrders, remotePending, [remotePendingCount], remoteItems] = await Promise.all([
 				sql`select id::text, name from custom_badges order by name`,
 				shopItems(),
 				sql`select o.id::text, o.item_name, o.price_cents::bigint as price, o.kind, o.payload, o.created_at, u.id::text as user_id, u.screen_name
@@ -60,7 +52,6 @@ export const moneyActions: Record<string, Action> = {
 				sql`select count(*)::int as n from money_remote_shop_items where source_active and status = 'pending'`,
 				sql`select origin, remote_id::text as id, name, price_cents::bigint as price, kind, badge_name, active
 					from money_remote_shop_items where source_active and status = 'approved' order by updated_at desc limit 500`,
-				otherReviewer(a.id).then((other) => !other),
 			]);
 			const n = (v: unknown) => Number(v);
 			return {
@@ -71,7 +62,6 @@ export const moneyActions: Record<string, Action> = {
 					items: items.map((i: any) => ({ ...i, price: Number(i.price), active: !!i.active })),
 					remote_pending: remotePending.map((i: any) => ({ ...i, price: Number(i.price) })),
 					remote_pending_count: remotePendingCount.n,
-					self_review: selfReview,
 					remote_items: remoteItems.map((i: any) => ({ ...i, price: Number(i.price), active: !!i.active })),
 					badges,
 					pending: pendingOrders.map((o: any) => ({ ...o, price: Number(o.price) })),
@@ -125,8 +115,9 @@ export const moneyActions: Record<string, Action> = {
 			return { shop: next };
 		},
 	},
+	// An admin's listing goes up at once; one from staff below admin waits for an admin.
 	createShopItem: {
-		role: "admin",
+		role: "moderator",
 		run: async (a, b) => {
 			const name = String(b.name ?? "").trim();
 			const description = String(b.description ?? "").trim();
@@ -141,14 +132,16 @@ export const moneyActions: Record<string, Action> = {
 				if (!(await sql`select 1 from custom_badges where id = ${badgeId}::bigint`).length) throw new AdminError("Choose an existing custom badge.");
 			}
 			const id = newId();
-			await sql`insert into money_shop_items (id, name, description, price_cents, kind, badge_id, active, status, created_by)
-				values (${id}::bigint, ${name}, ${description}, ${price}, ${kind}, ${badgeId}::bigint, false, 'pending', ${a.id}::bigint)`;
-			await audit(a, "money_shop_item_create", id, { name, price, kind, badgeId });
-			return { id };
+			const approved = a.role === "admin";
+			await sql`insert into money_shop_items (id, name, description, price_cents, kind, badge_id, active, status, created_by, approved_by, approved_at)
+				values (${id}::bigint, ${name}, ${description}, ${price}, ${kind}, ${badgeId}::bigint, ${approved}, ${approved ? "approved" : "pending"}, ${a.id}::bigint,
+					${approved ? a.id : null}::bigint, ${approved ? new Date() : null})`;
+			await audit(a, "money_shop_item_create", id, { name, price, kind, badgeId, approved });
+			return { id, approved };
 		},
 	},
 	reviewShopItem: {
-		role: "moderator",
+		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id, "shop item");
 			const approve = b.approve === true;
@@ -156,7 +149,6 @@ export const moneyActions: Record<string, Action> = {
 				const [row] = await tx`select name, status, created_by::text from money_shop_items where id = ${id}::bigint for update`;
 				if (!row) throw new AdminError("No such shop item.", 404);
 				if (row.status !== "pending") throw new AdminError("That shop item has already been reviewed.");
-				if (row.created_by === a.id && (await otherReviewer(a.id, tx))) throw new AdminError("A different staff member must review this shop item.");
 				await tx`update money_shop_items set status = ${approve ? "approved" : "rejected"}, active = ${approve},
 					approved_by = ${approve ? a.id : null}::bigint, approved_at = case when ${approve} then now() else null end
 					where id = ${id}::bigint`;

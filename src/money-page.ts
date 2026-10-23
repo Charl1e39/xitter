@@ -6,6 +6,7 @@
 import { accountPage, esc } from "./account-page";
 import type { Viewer } from "./auth";
 import { sql } from "./db";
+import { peers } from "./federation";
 import { BADGE_TYPES, absolute } from "./media";
 import { CARD_CSS } from "./money-ui";
 import {
@@ -211,7 +212,7 @@ document.querySelectorAll("input[data-people]").forEach(function(input){
 		if(!q){show(false);return}
 		if(q===asked&&items.length){show(true);return}
 		asked=q;
-		fetch("/account/money/people?q="+encodeURIComponent(q),{credentials:"same-origin"}).then(function(r){return r.ok?r.json():[]}).then(function(list){
+		fetch("/account/money/people?q="+encodeURIComponent(q)+(input.hasAttribute("data-local")?"&local=1":""),{credentials:"same-origin"}).then(function(r){return r.ok?r.json():[]}).then(function(list){
 			if(asked===q&&document.activeElement===input)draw(list);
 		},function(){});
 	}
@@ -332,13 +333,16 @@ async function quickPicks(userId: string) {
 }
 
 // GET /account/money/people?q=: accounts for the To and From fields' list,
-// matched by handle or name; people the viewer follows and has paid first
-async function peopleApi(viewer: Viewer, query: string): Promise<Response> {
+// matched by handle or name; people the viewer follows and has paid first.
+// Money goes to accounts here and on peers; requests (`local`) stay here.
+async function peopleApi(viewer: Viewer, query: string, local: boolean): Promise<Response> {
 	const q = query.trim().replace(/^@/, "").toLowerCase().slice(0, 300);
 	if (!q) return Response.json([]);
 	const like = `${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+	const reachable = local ? [] : peers().map((p) => p.id);
 	const rows = await sql`select u.id::text from users u
 		where u.status <> 'suspended' and u.deactivated_at is null and u.id <> ${viewer.id}::bigint
+			and (u.instance is null or u.instance = any(${sql.array(reachable, "TEXT")}))
 			and (lower(u.screen_name) like ${like} or lower(u.name) like ${like} or lower(u.name) like ${`% ${like}`})
 			and not exists (select 1 from blocks b where (b.blocker_id = u.id and b.blocked_id = ${viewer.id}::bigint) or (b.blocker_id = ${viewer.id}::bigint and b.blocked_id = u.id))
 		order by lower(u.screen_name) = ${q} desc,
@@ -411,7 +415,7 @@ async function requestView(req: Request, viewer: Viewer, status = 200, form: { f
 <form method="post" action="/account/money/request" class="send" autocomplete="off">
 <div class="big"><span>$</span><input id="amount" name="amount" inputmode="decimal" placeholder="0" aria-label="Amount" value="${esc(form.amount ?? "")}"></div>
 <div class="balance">Leave it at 0 to let people choose</div>
-<div class="field"><input id="from" name="from" placeholder=" " value="${esc(from)}" autocapitalize="off" autocomplete="off" spellcheck="false" data-people role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="people"><label for="from">From (@username, or empty for anyone)</label></div>
+<div class="field"><input id="from" name="from" placeholder=" " value="${esc(from)}" autocapitalize="off" autocomplete="off" spellcheck="false" data-people data-local role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="people"><label for="from">From (@username, or empty for anyone)</label></div>
 <div class="field"><input id="note" name="note" maxlength="${NOTE_MAX}" placeholder=" " value="${esc(form.note ?? "")}"><label for="note">What's it for?</label></div>
 <label class="check"><span>Share it in a post<small>A Pay button anyone who sees the post can use</small></span><input type="checkbox" name="share" value="1" checked></label>
 <button type="submit" class="pill primary wide">Request</button>
@@ -615,7 +619,7 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 		const [items, orders, balance] = await Promise.all([shopItems(true), myShopOrders(viewer.id), balanceOf(viewer.id)]);
 		return page(req, viewer, "Equicoins shop", await shopView(items, orders, balance, error, url.searchParams.has("requested") ? "Your request is waiting for staff approval." : ""));
 	}
-	if (p === "/account/money/people") return peopleApi(viewer, url.searchParams.get("q") ?? "");
+	if (p === "/account/money/people") return peopleApi(viewer, url.searchParams.get("q") ?? "", url.searchParams.has("local"));
 	const sending = p === "/account/money/send";
 	if (!sending && p !== "/account/money") return new Response("not found", { status: 404 });
 	if (req.method !== "POST") {
