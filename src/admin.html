@@ -235,7 +235,7 @@ const GROUPS = [
 	["Moderation", ["reports", "appeals", "automod", "posts", "articles", "media"]],
 	["People", ["users", "orgs", "invites", "badges"]],
 	["Content", ["stickers", "hashflags", "topics", "cards"]],
-	["Instance", ["settings", "switches", "email", "apps", "oauth", "federation", "hosting"]],
+	["Instance", ["settings", "switches", "email", "apps", "oauth", "federation"]],
 	["Staff and system", ["permissions", "security", "audit", "errors", "backups", "client"]],
 ];
 function openGroup(g, on) {
@@ -431,7 +431,35 @@ const RENDER = {
 
 	async media(main) {
 		let offset = 0;
-		main.innerHTML = '<h1>Media</h1><p class="dim small">Newest first. Deleting removes the file from every post and profile that uses it.</p><div class="mediagrid" id="grid"></div><div class="row" style="margin-top:16px"><button class="btn" id="more">Show more</button></div>';
+		main.innerHTML = '<h1>Media</h1><p class="dim small">Newest first. Deleting removes the file from every post and profile that uses it.</p>' +
+			(can("deleteMedia") ? '<div class="bar" id="mbulk" hidden><span class="small" id="mpicked"></span><button class="btn danger" id="mdel">Delete selected</button></div>' : "") +
+			'<p class="small" id="mresult" role="status"></p><div class="mediagrid" id="grid"></div><div class="row" style="margin-top:16px"><button class="btn" id="more">Show more</button></div>';
+		const mpicked = () => [...main.querySelectorAll("[data-mpick]:checked")].map((c) => c.dataset.mpick);
+		const updateMediaPick = () => {
+			if (!$("#mbulk")) return;
+			const n = mpicked().length;
+			$("#mbulk").hidden = !n;
+			$("#mpicked").textContent = n + " selected:";
+		};
+		main.addEventListener("change", (e) => { if (e.target.matches("[data-mpick]")) updateMediaPick(); });
+		if ($("#mdel")) $("#mdel").onclick = async () => {
+			const ids = mpicked();
+			if (!ids.length || !(await ask("Delete " + ids.length + " files for good?"))) return;
+			$("#mdel").disabled = true;
+			let deleted = 0;
+			const failures = [];
+			for (const id of ids) {
+				try {
+					await api("deleteMedia", { id });
+					main.querySelector('[data-media="' + id + '"]')?.remove();
+					offset--;
+					deleted++;
+				} catch (e) { failures.push(id + ": " + e.message); }
+			}
+			$("#mresult").textContent = deleted + " deleted, " + failures.length + " failed." + (failures.length ? " " + failures.join("; ") : "");
+			updateMediaPick();
+			$("#mdel").disabled = false;
+		};
 		const load = async () => {
 			const { media } = await api("media", { offset });
 			offset += media.length;
@@ -440,7 +468,7 @@ const RENDER = {
 				(m.state === "ready" || m.kind !== "video" ? '<img alt="" loading="lazy" src="/media/' + (m.kind === "video" ? "poster/" + esc(m.id) + ".jpg" : esc(m.id)) + '">' : '<span class="dim small">' + esc(m.state) + "</span>") +
 				(m.kind === "video" ? '<span class="icon play">play_circle</span>' : "") + "</a>" +
 				'<div class="small" style="margin-top:8px"><a href="#user/' + esc(m.user_id) + '">@' + esc(m.screen_name) + '</a> <span class="dim">· ' + (m.size < 1048576 ? Math.ceil(m.size / 1024) + " KB" : (m.size / 1048576).toFixed(1) + " MB") + " · " + esc(when(m.created_at)) + "</span>" + (m.post_id ? "" : ' <span class="dim">· not in a post</span>') + "</div>" +
-				(can("deleteMedia") ? '<button class="btn danger" style="margin-top:8px" data-del>Delete</button>' : "") + "</div>").join(""));
+				(can("deleteMedia") ? '<div class="row" style="margin-top:8px"><label class="row small"><input type="checkbox" data-mpick="' + esc(m.id) + '"> Select</label><button class="btn danger" data-del>Delete</button></div>' : "") + "</div>").join(""));
 			if (!media.length && !offset) $("#grid").outerHTML = '<div class="empty">No uploads yet.</div>';
 			if (media.length < 60) $("#more")?.remove();
 			main.querySelectorAll("[data-media] [data-del]:not([data-bound])").forEach((b) => {
@@ -448,7 +476,7 @@ const RENDER = {
 				b.onclick = async () => {
 					if (!(await ask("Delete this file for good?"))) return;
 					const box = b.closest("[data-media]");
-					act(() => api("deleteMedia", { id: box.dataset.media }), "Deleted").then(() => box.remove());
+					act(async () => { await api("deleteMedia", { id: box.dataset.media }); box.remove(); offset--; updateMediaPick(); }, "Deleted");
 				};
 			});
 		};
@@ -964,11 +992,16 @@ const RENDER = {
 					["likes", "replies", "reposts", "quotes", "bookmarks", "views"].map((k) => '<label class="small" style="width:30%">' + k + '<input data-k="' + k + '" type="number" min="0" value="' + (c[k] ?? "") + '"></label>').join("") +
 					'</div><button class="btn primary" data-save-counts style="margin-top:8px">Save counts</button></div>' : "") + "</div>";
 		};
-		main.innerHTML = '<h1>Posts</h1><div class="bar"><input id="q" placeholder="Text contains" style="flex:1;min-width:160px"><input id="author" placeholder="@author"></div><p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
+		const pickable = can("deletePost") || can("setPostVisibility");
+		main.innerHTML = '<h1>Posts</h1><div class="bar"><input id="q" placeholder="Text contains" style="flex:1;min-width:160px"><input id="author" placeholder="@author"></div>' +
+			(pickable ? '<div class="bar" id="pbulk" hidden><span class="small" id="ppicked"></span>' +
+				(can("setPostVisibility") ? '<button class="btn" id="phide">Hide</button><button class="btn" id="psens">Mark sensitive</button>' : "") +
+				(can("deletePost") ? '<button class="btn danger" id="pdel">Delete</button>' : "") + "</div>" : "") +
+			'<p class="small" id="presult" role="status"></p><p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
 			'<div class="row" style="margin-top:16px"><button class="btn" id="more" hidden>Show more</button></div>';
 		// 50 at a time; after an edit the same number is fetched again, a new search starts over
 		let posts = [];
-		const load = async (more) => {
+		const load = async (more, keep = []) => {
 			const q = { q: $("#q").value, author: $("#author").value };
 			const page = more === "new" ? await api("posts", { ...q, offset: 0 })
 				: more === true ? await api("posts", { ...q, offset: posts.length })
@@ -976,9 +1009,10 @@ const RENDER = {
 			posts = more === true ? posts.concat(page.posts) : page.posts;
 			$("#total").textContent = page.total + (page.total === 1 ? " post" : " posts") + (posts.length < page.total ? ", showing " + posts.length : "");
 			$("#more").hidden = posts.length >= page.total;
+			if ($("#pbulk")) $("#pbulk").hidden = true;
 			$("#list").innerHTML = posts.length
-				? '<table class="table"><tr><th>Post</th><th>Author</th><th>When</th><th></th></tr>' +
-					posts.map((p) => "<tr><td>" + (p.reply_to_id ? '<span class="dim small">reply · </span>' : "") + esc(p.text || "(no text)") + (p.media ? ' <span class="dim small">· ' + p.media + " media</span>" : "") +
+				? '<table class="table"><tr>' + (pickable ? '<th style="width:32px"></th>' : "") + '<th>Post</th><th>Author</th><th>When</th><th></th></tr>' +
+					posts.map((p) => "<tr>" + (pickable ? '<td><input type="checkbox" data-ppick="' + esc(p.id) + '"></td>' : "") + "<td>" + (p.reply_to_id ? '<span class="dim small">reply · </span>' : "") + esc(p.text || "(no text)") + (p.media ? ' <span class="dim small">· ' + p.media + " media</span>" : "") +
 						(p.hidden ? ' <span class="pill suspended">hidden</span>' : "") + (p.sensitive ? ' <span class="pill restricted">sensitive</span>' : "") +
 						(p.notice ? ' <span class="pill restricted">' + esc(NOTICE_LABELS[p.notice.type] || p.notice.type) + "</span>" : "") + (p.count_overrides ? ' <span class="pill">counts set</span>' : "") +
 						'<div class="dim small">' + p.likes + ' likes · <a href="/' + esc(p.screen_name) + "/status/" + esc(p.id) + '" target="_blank">open</a></div></td><td><a href="#user/' + esc(p.user_id) + '">@' + esc(p.screen_name) + '</a></td><td class="small dim">' + esc(when(p.created_at)) + "</td><td>" +
@@ -987,8 +1021,13 @@ const RENDER = {
 								'<button class="btn" data-vis="' + esc(p.id) + '" data-hidden="' + !!p.hidden + '" data-sensitive="' + !p.sensitive + '" title="Media behind a content warning">' + (p.sensitive ? "Not sensitive" : "Sensitive") + "</button>" : "") +
 							(can("setPostNotice") || can("setPostCounts") ? '<button class="btn" data-edit="' + esc(p.id) + '">Edit</button>' : "") +
 							(can("deletePost") ? '<button class="btn danger" data-del="' + esc(p.id) + '">Delete</button>' : "") + "</div></td></tr>" +
-						'<tr data-editor="' + esc(p.id) + '" hidden><td colspan="4">' + postEditor(p) + "</td></tr>").join("") + "</table>"
+						'<tr data-editor="' + esc(p.id) + '" hidden><td colspan="' + (pickable ? 5 : 4) + '">' + postEditor(p) + "</td></tr>").join("") + "</table>"
 				: '<div class="empty">No posts match.</div>';
+			keep.forEach((id) => { const c = main.querySelector('[data-ppick="' + id + '"]'); if (c) c.checked = true; });
+			if ($("#pbulk")) {
+				$("#pbulk").hidden = !keep.length;
+				$("#ppicked").textContent = keep.length + " selected:";
+			}
 			$("#list").querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
 				const row = $("#list").querySelector('[data-editor="' + b.dataset.edit + '"]');
 				row.hidden = !row.hidden;
@@ -1008,6 +1047,30 @@ const RENDER = {
 				act(() => api("deletePost", { id: b.dataset.del }), "Post deleted").then(load);
 			});
 		};
+		const ppicked = () => [...main.querySelectorAll("[data-ppick]:checked")].map((c) => c.dataset.ppick);
+		main.addEventListener("change", (e) => {
+			if (!e.target.matches("[data-ppick]") || !$("#pbulk")) return;
+			const n = ppicked().length;
+			$("#pbulk").hidden = !n;
+			$("#ppicked").textContent = n + " selected:";
+		});
+		main.querySelectorAll("#phide, #psens, #pdel").forEach((button) => button.onclick = async () => {
+			const ids = ppicked();
+			const action = button.id === "pdel" ? "Delete" : button.id === "phide" ? "Hide" : "Mark sensitive";
+			if (!ids.length || !(await ask(action + " " + ids.length + " posts?"))) return;
+			main.querySelectorAll("#pbulk button").forEach((b) => b.disabled = true);
+			const failures = [];
+			for (const id of ids) {
+				try {
+					const post = posts.find((p) => p.id === id);
+					if (button.id === "pdel") await api("deletePost", { id });
+					else await api("setPostVisibility", { id, hidden: button.id === "phide" || !!post.hidden, sensitive: button.id === "psens" || !!post.sensitive });
+				} catch (e) { failures.push({ id, why: e.message }); }
+			}
+			$("#presult").textContent = (ids.length - failures.length) + " succeeded, " + failures.length + " failed." + (failures.length ? " " + failures.map((f) => f.id + ": " + f.why).join("; ") : "");
+			try { await load(false, failures.map((f) => f.id)); } catch (e) { notice("Could not refresh posts: " + e.message, true); }
+			main.querySelectorAll("#pbulk button").forEach((b) => b.disabled = false);
+		});
 		let t;
 		$("#q").oninput = $("#author").oninput = () => { clearTimeout(t); t = setTimeout(() => load("new"), 250); };
 		$("#more").onclick = () => load(true);
