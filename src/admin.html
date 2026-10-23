@@ -189,7 +189,7 @@ const NOTICE_LABELS = { Fosnr: "Visibility limited", Misleading: "Misleading", S
 const sweepText = (c) => {
 	const mb = (n) => (n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0) + " MB";
 	if (c.running) return "Compressing stored files: " + c.done + " of " + c.files + " done, " + mb(c.before - c.after) + " saved so far.";
-	if (c.files) return "Last run: " + c.done + " of " + c.files + " files looked at, " + mb(c.before - c.after) + " saved" + (c.error ? " (stopped: " + c.error + ")" : "") + ".";
+	if (c.files) return "Last run: " + c.done + " of " + c.files + " files looked at, " + mb(c.before - c.after) + " saved" + (c.error ? " (" + c.error + ")" : "") + ".";
 	return "Files stored before compression was on stay as they are until you compress them here.";
 };
 const when = (d) => d ? new Date(d).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "never";

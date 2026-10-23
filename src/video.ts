@@ -4,7 +4,7 @@
 // the client polls the upload STATUS command meanwhile.
 
 import { settings } from "./settings";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { setPriority } from "node:os";
 import { join } from "node:path";
 import { sql } from "./db";
@@ -201,7 +201,7 @@ export function recompressVideo(dir: string, id: string): Promise<{ before: numb
 			const after = Bun.file(tmp).size;
 			if (!out || after >= before) return { before, after: before };
 			renameSync(tmp, file);
-			await sql`update media set size = ${after}, width = ${out.width}, height = ${out.height} where id = ${id}::bigint`;
+			await sql`update media set size = ${after}, width = ${out.width}, height = ${out.height}, compressed = true where id = ${id}::bigint`;
 			return { before, after };
 		} finally {
 			progress.delete(id);
@@ -214,6 +214,8 @@ export function recompressVideo(dir: string, id: string): Promise<{ before: numb
 
 // uploads that were still converting when the server stopped
 export async function resumeVideos(dir: string) {
+	// half-written encodings from a stop mid-way; the originals beside them are intact
+	if (existsSync(dir)) for (const f of readdirSync(dir)) if (/^\d+\.(tmp\.mp4|part\d+)$/.test(f)) rmSync(join(dir, f), { force: true });
 	const rows = await sql`select id from media where state = 'processing'`;
 	for (const r of rows) {
 		const id = String(r.id);

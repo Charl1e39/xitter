@@ -19,6 +19,9 @@ import { FFMPEG, recompressVideo, spawnLimited } from "./video";
 
 const PHOTO = new Set(["image/jpeg", "image/png", "image/webp"]);
 const PHOTO_MS = 30_000;
+// decoding takes about 4 bytes a pixel: a 774 KB PNG of 16000x16000 held
+// almost a gigabyte, two at a time. Bigger ones are kept as they came.
+const MAX_PIXELS = 40_000_000;
 
 // EXIF orientation 2-8 as ffmpeg filters; 1 is upright
 const ORIENT: Record<number, string> = { 2: "hflip", 3: "hflip,vflip", 4: "vflip", 5: "transpose=0", 6: "transpose=1", 7: "transpose=3", 8: "transpose=2" };
@@ -91,12 +94,16 @@ async function inTurn<T>(job: () => Promise<T>): Promise<T> {
 	}
 }
 
-// The smaller of the photo and its re-encoding; undefined when it couldn't be
-// tried (not a still photo, or ffmpeg failed), so it can be tried again later.
+// why the last photo couldn't be encoded, for the sweep to report
+let failure: string | undefined;
+
+// The smaller of the photo and its re-encoding; the photo itself when it's
+// left alone (animated, or too big to decode); undefined when it couldn't be
+// tried (not a photo, or ffmpeg failed), so it can be tried again later.
 export async function shrinkPhoto(data: Buffer, image: Image): Promise<{ data: Buffer; image: Image } | undefined> {
 	if (!PHOTO.has(image.mime)) return undefined;
 	const shape = shapeOf(data, image.mime);
-	if (shape.animated) return undefined;
+	if (shape.animated || image.width * image.height > MAX_PIXELS) return { data, image };
 	const m = settings().media;
 	const side = m.photo_max_side;
 	const filters = [ORIENT[image.mime === "image/jpeg" ? exifOrientation(data) : 1], `scale='min(iw,${side})':'min(ih,${side})':force_original_aspect_ratio=decrease`]
@@ -111,12 +118,21 @@ export async function shrinkPhoto(data: Buffer, image: Image): Promise<{ data: B
 			data,
 		);
 		const [bytes, code] = await Promise.all([new Response(p.stdout).arrayBuffer(), p.exited]);
-		if (code !== 0) return undefined;
+		if (code !== 0) {
+			failure = `ffmpeg exited with ${code}`;
+			return undefined;
+		}
 		const out = Buffer.from(bytes);
 		const made = sniffImage(out);
-		if (!made || made.width < 1 || made.height < 1) return undefined;
+		if (!made || made.width < 1 || made.height < 1) {
+			failure = "ffmpeg made no picture";
+			return undefined;
+		}
 		return out.length < data.length ? { data: out, image: made } : { data, image };
-	}).catch(() => undefined);
+	}).catch((e) => {
+		failure = e instanceof Error ? e.message : String(e);
+		return undefined;
+	});
 }
 
 // an upload on its way to disk; `compressed` marks it done for the sweep below
@@ -137,7 +153,8 @@ async function recompressPhoto(id: string): Promise<{ before: number; after: num
 		const temp = `${file}.part${newId()}`;
 		writeFileSync(temp, smaller.data);
 		renameSync(temp, file);
-		await sql`update media set mime = ${smaller.image.mime}, size = ${smaller.data.length}, width = ${smaller.image.width}, height = ${smaller.image.height}
+		// marked in the same statement: a stop between two would encode it twice
+		await sql`update media set mime = ${smaller.image.mime}, size = ${smaller.data.length}, width = ${smaller.image.width}, height = ${smaller.image.height}, compressed = true
 			where id = ${id}::bigint`;
 	}
 	return { before: data.length, after: smaller.data.length };
@@ -158,6 +175,8 @@ const waitingFiles = () => sql`remote_instance is null and state = 'ready' and n
 export function startSweep(): boolean {
 	if (sweep.running) return false;
 	const state: Sweep = (sweep = { running: true, files: 0, done: 0, before: 0, after: 0 });
+	let failed = 0;
+	failure = undefined;
 	void (async () => {
 		const [{ n }] = await sql`select count(*)::int as n from media where ${waitingFiles()}`;
 		state.files = n;
@@ -170,11 +189,19 @@ export function startSweep(): boolean {
 				after = r.id;
 				const saved = r.kind === "video" ? await recompressVideo(MEDIA_DIR, r.id) : await recompressPhoto(r.id);
 				state.done++;
-				if (!saved) continue;
+				if (!saved) {
+					failed++;
+					continue;
+				}
 				state.before += saved.before;
 				state.after += saved.after;
 				await sql`update media set compressed = true where id = ${r.id}::bigint`;
 			}
+		}
+		// a missing or broken ffmpeg otherwise reads as "0 MB saved"
+		if (failed) {
+			state.error = `${failed} ${failed === 1 ? "file" : "files"} couldn't be compressed${failure ? `: ${failure}` : ""}`;
+			await recordError("job", new Error(state.error), { path: "media compression" });
 		}
 	})()
 		.catch((e) => {
