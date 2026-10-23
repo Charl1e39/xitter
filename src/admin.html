@@ -982,6 +982,8 @@ const RENDER = {
 		// shop item types (money-shop.ts SHOP_KINDS), and the days a lasting one gives by default
 		const KINDS = { badge: "Custom badge", custom_badge: "Request a custom badge", announcement: "Custom announcement", checkmark: "Blue checkmark", invite: "Invite code", hashflag: "Hashflag", sticker_pack: "Sticker pack", explore_card: "Explore card", boost: "Post boost" };
 		const DAYS = { checkmark: 30, hashflag: 7, explore_card: 1, boost: 1 };
+		// what a moderator may deliver (money-admin.ts MODERATOR_DELIVERS); the rest needs an admin
+		const MOD_DELIVERS = ["badge", "custom_badge"];
 		const daysOf = (n) => n ? " · " + n + (n === 1 ? " day" : " days") : "";
 		const kindOf = (i) => (i.kind === "badge" ? i.badge_name : (KINDS[i.kind] || i.kind).toLowerCase()) + daysOf(i.days);
 		const orderFile = (o, n, side = 64) => '<img src="/account/money/shop/file/' + esc(o.id) + '/' + n + '" alt="Picture ' + (n + 1) + '" style="width:' + side + 'px;max-height:' + side + 'px;object-fit:contain;border:1px solid var(--line);border-radius:8px;padding:4px">';
@@ -1024,6 +1026,7 @@ const RENDER = {
 			"</div>" +
 			'<section style="margin-top:20px"><h2>Shop</h2><p class="dim">Sell custom badges and announcement slots for Equicoins. Purchases are charged while pending. Staff approval delivers the item; rejecting a request refunds it.</p>' +
 			'<div class="box" style="margin-top:12px"><label class="row"><input type="checkbox" id="shopOn"' + (m.shop.enabled ? " checked" : "") + (admin ? "" : " disabled") + '> Equicoins shop is open</label>' +
+			(m.shop.announcement && m.shop.announcement.text ? '<p class="row" style="margin-top:10px"><span class="dim small">Paid announcement up now: “' + esc(m.shop.announcement.text) + '”</span>' + (admin ? '<button class="btn" id="shopAnnOff">Take down</button>' : "") + "</p>" : "") +
 			(can("createShopItem") ? '<div class="field" style="margin-top:12px"><label>New item name</label><input id="shopName" maxlength="60" placeholder="Community badge"></div><div class="field"><label>Description</label><input id="shopDesc" maxlength="240" placeholder="A badge for your profile"></div>' +
 			'<div class="field"><label>Price ($)</label><input id="shopPrice" inputmode="decimal" placeholder="5"></div><div class="field"><label>What it gives</label><div class="shop-picker" data-shop-picker><input type="hidden" id="shopKind" value="badge"><button type="button" class="shop-picker-trigger" aria-haspopup="listbox" aria-expanded="false"><span>Custom badge</span><span aria-hidden="true">⌄</span></button><div class="shop-picker-menu" role="listbox" hidden>' + Object.entries(KINDS).map(([value, label]) => '<button type="button" class="shop-picker-option" role="option" data-value="' + value + '" aria-selected="' + (value === "badge") + '">' + label + '</button>').join("") + '</div></div></div>' +
 			'<div class="field" id="shopDaysField" hidden><label>Lasts (days)</label><input id="shopDays" inputmode="numeric" maxlength="3"></div>' +
@@ -1034,7 +1037,7 @@ const RENDER = {
 					: o.kind === "explore_card" ? '<div style="margin-top:8px">' + (o.files ? orderFile(o, 0, 200) : "") + '<p><b>' + esc(o.payload?.title || "") + '</b></p><p class="dim small">' + esc(o.payload?.summary || "") + '</p><p class="small">Opens a search for ' + esc(o.payload?.query || "") + '</p></div>'
 					: o.kind === "boost" ? '<p style="margin-top:8px"><a target="_blank" href="/' + esc(o.screen_name) + '/status/' + esc(o.payload?.postId || "") + '">See the post to boost</a></p>'
 					: "") +
-				(staff ? '<div class="row" style="margin-top:8px"><button class="btn primary" data-shop-review="' + esc(o.id) + '" data-approve="1">Approve</button><button class="btn danger" data-shop-review="' + esc(o.id) + '" data-approve="0">Reject and refund</button></div>' : "") + "</div>").join("") + "</div>" : '<p class="dim small">Nothing waiting for review.</p>') + "</div></div></section>" +
+				(staff ? '<div class="row" style="margin-top:8px">' + (can("admin") || MOD_DELIVERS.includes(o.kind) ? '<button class="btn primary" data-shop-review="' + esc(o.id) + '" data-approve="1">Approve</button>' : '<span class="dim small">An admin delivers this kind</span>') + '<button class="btn danger" data-shop-review="' + esc(o.id) + '" data-approve="0">Reject and refund</button></div>' : "") + "</div>").join("") + "</div>" : '<p class="dim small">Nothing waiting for review.</p>') + "</div></div></section>" +
 			'<h2>Payments</h2><div class="row" style="margin-bottom:12px"><input id="mq" placeholder="Payments to or from @username" value="' + esc(q) + '" style="flex:1;min-width:200px"><button class="btn" id="mqs">Search</button></div>' +
 			'<div class="scroll">' + (m.recent.length
 				? '<table class="table"><tr><th>When</th><th>From</th><th>To</th><th>Amount</th>' + (m.notes ? "<th>Note</th>" : "") + "<th></th></tr>" +
@@ -1043,6 +1046,10 @@ const RENDER = {
 				: '<div class="empty">No payments' + (q ? " for @" + esc(q) : "") + ".</div>") + "</div>";
 		const again = () => this.money(main, $("#mq").value);
 		if ($("#shopOn")) $("#shopOn").onchange = () => act(() => api("saveShop", { enabled: $("#shopOn").checked }), "Shop setting saved").then(again);
+		if ($("#shopAnnOff")) $("#shopAnnOff").onclick = async () => {
+			if (!(await ask("Take the paid announcement down? The buyer keeps what they paid."))) return;
+			act(() => api("clearShopAnnouncement"), "Paid announcement taken down").then(again);
+		};
 		main.querySelectorAll("[data-shop-picker]").forEach((picker) => {
 			const trigger = picker.querySelector(".shop-picker-trigger");
 			const menu = picker.querySelector(".shop-picker-menu");

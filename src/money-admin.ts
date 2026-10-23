@@ -11,6 +11,9 @@ import { allows } from "./staff-permissions";
 import { SHOP_DAYS, SHOP_KINDS, shopItems } from "./money-shop";
 import { BADGE_TYPES, sniffImage } from "./media";
 
+// what staff below admin may deliver from the shop's queue (admin.html hides Approve for the rest)
+export const MODERATOR_DELIVERS = ["badge", "custom_badge"];
+
 // dollars typed in the panel ("100", "0.50") as cents, within limits
 function cents(v: unknown, what: string, min: number, max: number) {
 	const c = typeof v === "number" ? Math.round(v * 100) : parseAmount(String(v ?? ""));
@@ -123,6 +126,17 @@ export const moneyActions: Record<string, Action> = {
 			return { shop: next };
 		},
 	},
+	// the paid announcement comes down; the instance's own (Settings) shows again
+	clearShopAnnouncement: {
+		role: "admin",
+		run: async (a) => {
+			const was = settings().money_shop.announcement;
+			if (!was) throw new AdminError("There's no paid announcement up.");
+			await setSetting("money_shop", { ...settings().money_shop, announcement: null });
+			await audit(a, "money_shop_announcement_clear", was.id, { text: was.text });
+			return {};
+		},
+	},
 	// An admin's listing goes up at once; one from staff below admin waits for an admin.
 	createShopItem: {
 		role: "moderator",
@@ -216,6 +230,9 @@ export const moneyActions: Record<string, Action> = {
 					from money_shop_orders where id = ${id}::bigint for update`;
 				if (!order) throw new AdminError("No such shop request.", 404);
 				if (order.status !== "pending") throw new AdminError("That shop request has already been reviewed.");
+				// a badge is the shop's business; the rest hands out what only admins give elsewhere in the panel
+				if (approve && !MODERATOR_DELIVERS.includes(order.kind) && a.role !== "admin" && !a.superadmin)
+					throw new AdminError("Only an admin can deliver this kind of request.", 403);
 				// a gift goes to its recipient; the buyer paid and gets any refund
 				const target: string = order.recipient_id ?? order.user_id;
 				const days = Number(order.days) || 1;

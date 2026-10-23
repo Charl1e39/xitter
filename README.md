@@ -135,17 +135,25 @@ copy during setup, and it stays on that machine.
       (`money.follow_network`, off)
     - Most taken in from one instance a day, its payments and likes together;
       over it, payments are refused and refunded and likes stop paying
-      (`money.peer_daily_cents`, 0 for no limit)
+      (`money.peer_daily_cents`, default $1,000, 0 for no limit). A peer's
+      word is all there is for what it sends, so this is the only brake on a
+      peer minting money here
     - An account moving to another instance takes its balance along
       (`money.move_balance`, on); the new instance takes it only for an account
-      it imported from there
+      it imported from there, once per move and up to 100 times its largest
+      payment
+    - A payment a peer hasn't taken after three days fails and goes back to
+      the sender
     - Share this instance's totals with peers and show the network's in
       circulation, wallets and payments (`money.network_totals`, off)
   - The shop (`/account/money/shop`, opened in Admin > Equicoins): accounts
     spend their balance on listings staff make. An admin's listing goes up at
     once; one from a moderator waits for an admin. A purchase is charged at
     once and waits for staff, who deliver it or refund it; an invite code is
-    the only thing that comes without review. What a listing can give:
+    the only thing that comes without review. Moderators deliver badges
+    (Staff permissions: Equicoins shop); everything else below is delivered
+    by an admin. A paid announcement stays up until an admin takes it down
+    in Admin > Equicoins. What a listing can give:
     - A custom badge staff made, or a badge the buyer designs (an image up to
       256 KB, GIFs animate)
     - An instance announcement the buyer writes

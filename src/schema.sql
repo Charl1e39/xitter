@@ -1567,6 +1567,8 @@ create table if not exists account_migrations (
 );
 create index if not exists account_migrations_user_idx on account_migrations (user_id, created_at desc);
 create unique index if not exists account_migrations_running_idx on account_migrations (user_id) where state = 'running';
+-- when the old instance's wallet came over (money-federation.ts): once per move
+alter table account_migrations add column if not exists balance_moved_at timestamptz;
 create table if not exists migration_objects (
 	user_id bigint not null references users (id) on delete cascade,
 	source text not null,
@@ -1614,7 +1616,7 @@ create table if not exists money_federation_outbox (
 	last_error text,
 	created_at timestamptz not null default now()
 );
-create index if not exists money_federation_outbox_due_idx on money_federation_outbox (next_attempt) where attempts >= 0;
+create index if not exists money_federation_outbox_due_idx on money_federation_outbox (next_attempt);
 create table if not exists money_federation_receipts (
 	origin text not null,
 	transfer_id bigint not null,

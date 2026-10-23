@@ -8,6 +8,10 @@ import { hateIn } from "./hate";
 import { feature, hasBlockedPhrase, settings } from "./settings";
 
 let pumping = false;
+// a moved balance is taken up to this many times the largest payment
+const MOVE_CAP = 100;
+// a transfer the peer hasn't taken after this long fails and goes back to the sender
+const GIVE_UP_AFTER = "3 days";
 
 export async function discoverMoneyAccount(value: string): Promise<void> {
 	const m = /^([A-Za-z0-9_]{1,15})@([a-z0-9.-]{1,253}(?::\d{1,5})?)$/i.exec(value);
@@ -60,10 +64,13 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 	const recipientId = String(body?.recipient ?? "");
 	const amount = Number(body?.amount);
 	const note = typeof body?.note === "string" ? body.note : "";
-	// a moved account's balance: all of it, past the limits, once the move is found here
+	// a moved account's balance: all of it, past the daily cap, once the move is
+	// found here. Only the peer knows the real balance, so a move is taken once
+	// per migration and never above MOVE_CAP times the largest payment.
 	const move = body?.move === true;
+	const cap = move ? MOVE_CAP * economy().max_transfer_cents : economy().max_transfer_cents;
 	if (!/^\d{1,19}$/.test(transferId) || !senderMatch || senderMatch[2].toLowerCase() !== incoming.from || !/^\d{1,19}$/.test(recipientId) ||
-		!Number.isSafeInteger(amount) || amount <= 0 || (!move && amount > economy().max_transfer_cents) || note.length > 140)
+		!Number.isSafeInteger(amount) || amount <= 0 || amount > cap || note.length > 140)
 		return signedAnswer(incoming, 400, { error: "Invalid transfer." });
 	// the same rule as a local payment's note; refusing sends the money back to the sender
 	if (note && (hateIn(note) || hasBlockedPhrase(note))) return signedAnswer(incoming, 422, { error: "That note can't be sent." });
@@ -71,10 +78,12 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 	if (!recipient || recipient.status === "suspended") return signedAnswer(incoming, 404, { error: "The recipient account is unavailable." });
 	// the old account may be deactivated by the move, so it isn't looked up for one
 	let senderId: string | undefined;
+	let migrationId: string | undefined;
 	if (move) {
-		const [moved] = await sql`select 1 from account_migrations where user_id = ${recipientId}::bigint and source_user_id = ${senderMatch[1]}::bigint
-			and source in (${`https://${incoming.from}`}, ${`http://${incoming.from}`}) limit 1`;
+		const [moved] = await sql`select id::text from account_migrations where user_id = ${recipientId}::bigint and source_user_id = ${senderMatch[1]}::bigint
+			and source in (${`https://${incoming.from}`}, ${`http://${incoming.from}`}) order by created_at desc limit 1`;
 		if (!moved) return signedAnswer(incoming, 403, { error: "That account didn't move here." });
+		migrationId = moved.id;
 		senderId = await import("./federation-sync").then(({ resolveUser }) => resolveUser(senderRef)).catch(() => undefined);
 	} else {
 		senderId = await import("./federation-sync").then(({ resolveUser }) => resolveUser(senderRef)).catch(() => undefined);
@@ -90,6 +99,10 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 			const [seen] = await tx`select 1 from money_federation_receipts where origin = ${incoming.from} and transfer_id = ${transferId}::bigint`;
 			if (seen) return "duplicate";
 			if (!move && !(await peerHasRoom(tx, incoming.from, amount))) return "full";
+			if (move) {
+				const took = await tx`update account_migrations set balance_moved_at = now() where id = ${migrationId}::bigint and balance_moved_at is null returning 1`;
+				if (!took.length) return "moved";
+			}
 			await tx`insert into money_federation_receipts (origin, transfer_id, amount_cents, move) values (${incoming.from}, ${transferId}::bigint, ${amount}, ${move})`;
 			await tx`insert into money_wallets (user_id, balance_cents) values (${recipientId}::bigint, ${economy().starting_cents}) on conflict (user_id) do nothing`;
 			await tx`update money_wallets set balance_cents = balance_cents + ${amount} where user_id = ${recipientId}::bigint`;
@@ -99,6 +112,7 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 			return "taken";
 		});
 		if (result === "full") return signedAnswer(incoming, 422, { error: "This instance has taken all it accepts from yours today." });
+		if (result === "moved") return signedAnswer(incoming, 403, { error: "That account's balance already moved here." });
 		return signedAnswer(incoming, 200, { accepted: true, duplicate: result === "duplicate" });
 	} catch (e) {
 		console.error("Equicoins federation transfer failed:", e instanceof Error ? e.message : e);
@@ -231,15 +245,25 @@ async function syncShops() {
 	} finally { syncingShop = false; }
 }
 
-async function pumpOnce() {
+// the peer refused, or never answered: the money goes back to the sender
+async function failTransfer(transferId: string) {
+	await sql.begin(async (tx) => {
+		const [sent] = await tx`update money_transfers set federation_status = 'failed' where id = ${transferId}::bigint and federation_status = 'pending' returning sender_id::text, amount_cents`;
+		if (sent) await tx`update money_wallets set balance_cents = balance_cents + ${Number(sent.amount_cents)} where user_id = ${sent.sender_id}::bigint`;
+		await tx`delete from money_federation_outbox where transfer_id = ${transferId}::bigint`;
+	});
+}
+
+export async function pumpOnce() {
 	if (pumping) return;
 	pumping = true;
 	try {
 		const rows = await sql`select o.transfer_id::text, o.destination, o.sender_id::text, o.recipient_id::text, o.amount_cents::bigint as amount,
-			o.note, o.attempts, o.move from money_federation_outbox o join money_transfers t on t.id = o.transfer_id
+			o.note, o.attempts, o.move, o.created_at < now() - ${GIVE_UP_AFTER}::interval as expired
+			from money_federation_outbox o join money_transfers t on t.id = o.transfer_id
 			where o.next_attempt <= now() and t.federation_status = 'pending' order by o.next_attempt limit 10`;
 		for (const r of rows) {
-			let status = 0, accepted = false;
+			let status = 0, accepted = false, error = "";
 			try {
 				const response = await signedFetch(r.destination, "POST", "/federation/v1/money/transfer", {
 					transferId: r.transfer_id,
@@ -251,9 +275,9 @@ async function pumpOnce() {
 				}, 64 * 1024);
 				status = response.status;
 				accepted = status >= 200 && status < 300 && response.json()?.accepted === true;
+				error = `remote status ${status}`;
 			} catch (e) {
-				await sql`update money_federation_outbox set attempts = attempts + 1, next_attempt = now() + interval '1 minute', last_error = ${String(e).slice(0, 300)} where transfer_id = ${r.transfer_id}::bigint`;
-				continue;
+				error = String(e).slice(0, 300);
 			}
 			if (accepted) {
 				await sql.begin(async (tx) => {
@@ -261,15 +285,11 @@ async function pumpOnce() {
 					await tx`delete from money_federation_outbox where transfer_id = ${r.transfer_id}::bigint`;
 				});
 				void import("./money").then(({ announcePayment }) => announcePayment(r.transfer_id));
-			} else if (status >= 400 && status < 500 && status !== 429) {
-				await sql.begin(async (tx) => {
-					const [sent] = await tx`update money_transfers set federation_status = 'failed' where id = ${r.transfer_id}::bigint and federation_status = 'pending' returning sender_id::text, amount_cents`;
-					if (sent) await tx`update money_wallets set balance_cents = balance_cents + ${Number(sent.amount_cents)} where user_id = ${sent.sender_id}::bigint`;
-					await tx`delete from money_federation_outbox where transfer_id = ${r.transfer_id}::bigint`;
-				});
+			} else if ((status >= 400 && status < 500 && status !== 429) || r.expired) {
+				await failTransfer(r.transfer_id);
 			} else {
-				const delay = Math.min(60, 2 ** Math.min(Number(r.attempts) + 1, 6));
-				await sql`update money_federation_outbox set attempts = attempts + 1, next_attempt = now() + ${delay} * interval '1 minute', last_error = ${`remote status ${status}`}
+				const delay = status ? Math.min(60, 2 ** Math.min(Number(r.attempts) + 1, 6)) : 1;
+				await sql`update money_federation_outbox set attempts = attempts + 1, next_attempt = now() + ${delay} * interval '1 minute', last_error = ${error}
 					where transfer_id = ${r.transfer_id}::bigint`;
 			}
 		}
