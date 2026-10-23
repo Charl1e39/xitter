@@ -32,6 +32,8 @@
 	h1 { margin: 0 0 16px; font-size: 22px; }
 	h2 { margin: 24px 0 10px; font-size: 17px; }
 	.bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
+	/* else a display rule like .bar's above shows what's meant to be hidden (the bulk bars) */
+	[hidden] { display: none !important; }
 	input, select, textarea { padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: inherit; font: inherit; }
 	input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); border-color: transparent; }
 	textarea { width: 100%; min-height: 70px; resize: vertical; }
@@ -80,6 +82,8 @@
 	.flags button { width: 34px; height: 34px; padding: 0; border: 2px solid var(--line); border-radius: 6px; background: none; color: var(--dim); font-size: 11px; cursor: pointer; display: grid; place-items: center; }
 	.flags button img { width: 20px; height: 20px; border-radius: 3px; }
 	.flags button.on { border-color: var(--blue); }
+	.flags button { position: relative; }
+	.flags button .ord { position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 999px; background: var(--blue); color: #fff; font-size: 10px; line-height: 1; display: grid; place-items: center; }
 	.chart { display: flex; align-items: flex-end; gap: 4px; height: 90px; margin-top: 8px; }
 	.chart div { flex: 1; background: var(--blue); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
 	nav .count { margin-left: auto; background: var(--blue); color: #fff; border-radius: 999px; padding: 1px 7px; font-size: 12px; font-weight: 700; }
@@ -185,6 +189,13 @@ async function act(fn, done) {
 
 // X's labels under a post (model.ts NOTICE_TYPES)
 const NOTICE_LABELS = { Fosnr: "Visibility limited", Misleading: "Misleading", StayInformed: "Stay informed", GetTheLatest: "Get the latest", GovernmentRequested: "Legally required notice" };
+// Settings > Media storage: what "Compress stored files" did or is doing
+const sweepText = (c) => {
+	const mb = (n) => (n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0) + " MB";
+	if (c.running) return "Compressing stored files: " + c.done + " of " + c.files + " done, " + mb(c.before - c.after) + " saved so far.";
+	if (c.files) return "Last run: " + c.done + " of " + c.files + " files looked at, " + mb(c.before - c.after) + " saved" + (c.error ? " (" + c.error + ")" : "") + ".";
+	return "Files stored before compression was on stay as they are until you compress them here.";
+};
 const when = (d) => d ? new Date(d).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "never";
 const duration = (s) => s < 3600 ? Math.floor(s / 60) + " min" : s < 172800 ? Math.floor(s / 3600) + " h" : Math.floor(s / 86400) + " days";
 // "Edge on Windows" from a user agent
@@ -196,7 +207,7 @@ function browser(ua) {
 }
 const avatar = (u) => u.avatar_url ? (u.avatar_url.startsWith("/") ? u.avatar_url : u.avatar_url) : "/abs/sticky/default_profile_images/default_profile_normal.png";
 const badge = (u) => u.verified_type ? '<span class="badge ' + esc(u.verified_type) + '" title="' + esc(u.verified_type) + '"></span>' : "";
-const flagImg = (u) => u.flag ? '<img class="flag" alt="' + esc(u.flag) + '" src="/public/flag-' + esc(u.flag) + '.svg">' : "";
+const flagImg = (u) => u.flag ? u.flag.split(",").filter((f) => /^[a-z]+$/.test(f)).slice(0, 4).map((f) => '<img class="flag" alt="' + esc(f) + '" src="/public/flag-' + esc(f) + '.svg">').join(" ") : "";
 const standing = (u) => (u.status && u.status !== "active" ? ' <span class="pill ' + esc(u.status) + '">' + esc(u.status) + "</span>" : "") + (u.role ? ' <span class="pill staff">' + esc(u.role) + "</span>" : "");
 const person = (u) => '<div class="person"><img class="avatar" alt="" src="' + esc(avatar(u)) + '"><div class="names"><div><b>' + esc(u.name) + "</b> " + badge(u) + " " + flagImg(u) + '</div><div class="dim small">@' + esc(u.screen_name) + standing(u) + "</div></div></div>";
 
@@ -204,6 +215,7 @@ const PAGES = {
 	overview: { icon: "monitoring", title: "Overview" },
 	reports: { icon: "flag", title: "Reports" },
 	appeals: { icon: "gavel", title: "Appeals", needs: "appeals" },
+	bulkStrike: { icon: "swords", title: "Bulk strike", needs: "bulkStrike" },
 	users: { icon: "group", title: "Users" },
 	orgs: { icon: "domain", title: "Organisations" },
 	posts: { icon: "chat", title: "Posts" },
@@ -233,7 +245,7 @@ const PAGES = {
 
 const GROUPS = [
 	[null, ["overview"]],
-	["Moderation", ["reports", "appeals", "automod", "posts", "articles", "media"]],
+	["Moderation", ["reports", "appeals", "bulkStrike", "automod", "posts", "articles", "media"]],
 	["People", ["users", "orgs", "invites", "badges"]],
 	["Content", ["stickers", "hashflags", "topics", "cards"]],
 	["Instance", ["settings", "switches", "money", "email", "apps", "oauth", "federation"]],
@@ -257,6 +269,7 @@ async function route() {
 	main.innerHTML = '<div class="empty">Loading…</div>';
 	try {
 		if (page === "user" && arg) await renderUser(main, arg);
+		else if (name === "media") await RENDER.media(main, arg);
 		else await RENDER[name](main);
 	} catch (e) {
 		main.innerHTML = '<div class="empty">' + esc(e.message) + "</div>";
@@ -430,18 +443,80 @@ const RENDER = {
 			act(() => api("setArticleVisibility", { id: b.dataset.article, hidden: b.dataset.hidden === "true" }), b.dataset.hidden === "true" ? "Article hidden" : "Article shown again").then(route));
 	},
 
-	async media(main) {
+	async bulkStrike(main) {
+		main.innerHTML = "<h1>Bulk strike</h1>" +
+			'<p class="dim small">One strike for many accounts at once: an alt chain, a raid, a ban evader\'s new accounts. Each account gets the message below as its own strike, and strikes count toward suspension on the usual ladder (see Automod). Accounts that staff rank protects are skipped, with the reason shown. Ticking accounts on the Users page and pressing Strike there does the same thing by id.</p>' +
+			(can("bulkStrike") ?
+			'<div class="field"><label>Handles, one per line</label><textarea id="bsHandles" rows="6" placeholder="@handle1&#10;@handle2"></textarea></div>' +
+			'<div class="field"><label>What they\'ll read</label><textarea id="bsBody" maxlength="2000" placeholder="Why they\'re getting this strike"></textarea></div>' +
+			'<label class="row" style="margin:6px 0"><input type="checkbox" id="bsEscalate" checked> Strikes count toward suspension</label>' +
+			(can("heldIdentities") ? '<label class="row" style="margin:6px 0"><input type="checkbox" id="bsAlts"> Also strike accounts seen from the same addresses (alts)</label>' : "") +
+			'<div class="row"><button class="btn primary" id="bsGo">Strike them all</button></div><div id="bsOut"></div>' : '<p class="dim small">Requires permission to send strikes.</p>');
+		if (!$("#bsGo")) return;
+		$("#bsGo").onclick = async () => {
+			const handles = $("#bsHandles").value.split(/[\s,]+/).filter(Boolean);
+			if (!handles.length) return;
+			if (!(await ask("Give " + handles.length + " accounts" + ($("#bsAlts")?.checked ? " and their alts" : "") + " a strike?"))) return;
+			$("#bsGo").disabled = true;
+			await act(async () => {
+				const { results, missing } = await api("bulkStrike", { handles, body: $("#bsBody").value, escalate: $("#bsEscalate").checked, include_alts: !!$("#bsAlts")?.checked });
+				const words = (r) => !r.ok ? (r.error ? "error: " : "skipped: ") + r.why
+					: r.outcome === undefined ? "strike sent (doesn't count toward suspension)"
+					: r.outcome === "staff" ? "staff account: message sent, no sanction"
+					: r.outcome === "warning" ? "strike " + r.strikes + ": warning"
+					: r.outcome === "second_chance" ? "strike " + r.strikes + ": second chance, not suspended"
+					: r.outcome === "permanent" ? "strike " + r.strikes + ": suspended for good"
+					: "strike " + r.strikes + ": suspended for " + r.hours + " hours";
+				$("#bsOut").innerHTML = '<div class="list" style="margin-top:14px">' +
+					results.map((r) => '<p><a href="#user/' + esc(r.id) + '">@' + esc(r.screen_name || r.id) + '</a> <span class="dim small">' + esc(words(r)) + "</span></p>").join("") +
+					(missing.length ? '<p class="dim small">No account named: ' + missing.map((m) => "@" + esc(m)).join(", ") + ".</p>" : "") + "</div>";
+			});
+			$("#bsGo").disabled = false;
+		};
+	},
+
+	async media(main, user) {
 		let offset = 0;
-		main.innerHTML = '<h1>Media</h1><p class="dim small">Newest first. Deleting removes the file from every post and profile that uses it.</p><div class="mediagrid" id="grid"></div><div class="row" style="margin-top:16px"><button class="btn" id="more">Show more</button></div>';
+		main.innerHTML = (user ? '<p><a href="#user/' + esc(user) + '">← Account</a> · <a href="#media">All media</a></p><h1>Media from <span id="mwho">this account</span></h1>' : "<h1>Media</h1>") +
+			'<p class="dim small">Newest first. Deleting removes the file from every post and profile that uses it.</p>' +
+			(can("deleteMedia") ? '<div class="bar" id="mbulk" hidden><span class="small" id="mpicked"></span><button class="btn danger" id="mdel">Delete selected</button></div>' : "") +
+			'<p class="small" id="mresult" role="status"></p><div class="mediagrid" id="grid"></div><div class="row" style="margin-top:16px"><button class="btn" id="more">Show more</button></div>';
+		const mpicked = () => [...main.querySelectorAll("[data-mpick]:checked")].map((c) => c.dataset.mpick);
+		const updateMediaPick = () => {
+			if (!$("#mbulk")) return;
+			const n = mpicked().length;
+			$("#mbulk").hidden = !n;
+			$("#mpicked").textContent = n + " selected:";
+		};
+		main.addEventListener("change", (e) => { if (e.target.matches("[data-mpick]")) updateMediaPick(); });
+		if ($("#mdel")) $("#mdel").onclick = async () => {
+			const ids = mpicked();
+			if (!ids.length || !(await ask("Delete " + ids.length + " files for good?"))) return;
+			$("#mdel").disabled = true;
+			let deleted = 0;
+			const failures = [];
+			for (const id of ids) {
+				try {
+					await api("deleteMedia", { id });
+					main.querySelector('[data-media="' + id + '"]')?.remove();
+					offset--;
+					deleted++;
+				} catch (e) { failures.push(id + ": " + e.message); }
+			}
+			$("#mresult").textContent = deleted + " deleted, " + failures.length + " failed." + (failures.length ? " " + failures.join("; ") : "");
+			updateMediaPick();
+			$("#mdel").disabled = false;
+		};
 		const load = async () => {
-			const { media } = await api("media", { offset });
+			const { media } = await api("media", { offset, ...(user ? { user } : {}) });
 			offset += media.length;
+			if (user && media[0] && $("#mwho")) $("#mwho").textContent = "@" + media[0].screen_name;
 			$("#grid").insertAdjacentHTML("beforeend", media.map((m) =>
 				'<div class="box" data-media="' + esc(m.id) + '"><a href="/media/' + esc(m.id) + '" target="_blank" class="thumb">' +
 				(m.state === "ready" || m.kind !== "video" ? '<img alt="" loading="lazy" src="/media/' + (m.kind === "video" ? "poster/" + esc(m.id) + ".jpg" : esc(m.id)) + '">' : '<span class="dim small">' + esc(m.state) + "</span>") +
 				(m.kind === "video" ? '<span class="icon play">play_circle</span>' : "") + "</a>" +
-				'<div class="small" style="margin-top:8px"><a href="#user/' + esc(m.user_id) + '">@' + esc(m.screen_name) + '</a> <span class="dim">· ' + (m.size < 1048576 ? Math.ceil(m.size / 1024) + " KB" : (m.size / 1048576).toFixed(1) + " MB") + " · " + esc(when(m.created_at)) + "</span>" + (m.post_id ? "" : ' <span class="dim">· not in a post</span>') + "</div>" +
-				(can("deleteMedia") ? '<button class="btn danger" style="margin-top:8px" data-del>Delete</button>' : "") + "</div>").join(""));
+				'<div class="small" style="margin-top:8px"><a href="#user/' + esc(m.user_id) + '">@' + esc(m.screen_name) + '</a> <span class="dim">· ' + (m.size < 1048576 ? Math.ceil(m.size / 1024) + " KB" : (m.size / 1048576).toFixed(1) + " MB") + " · " + esc(when(m.created_at)) + "</span>" + (m.avatar ? ' <span class="dim">· profile picture</span>' : m.banner ? ' <span class="dim">· banner</span>' : m.post_id ? "" : ' <span class="dim">· not in a post</span>') + "</div>" +
+				(can("deleteMedia") ? '<div class="row" style="margin-top:8px"><label class="row small"><input type="checkbox" data-mpick="' + esc(m.id) + '"> Select</label><button class="btn danger" data-del>Delete</button></div>' : "") + "</div>").join(""));
 			if (!media.length && !offset) $("#grid").outerHTML = '<div class="empty">No uploads yet.</div>';
 			if (media.length < 60) $("#more")?.remove();
 			main.querySelectorAll("[data-media] [data-del]:not([data-bound])").forEach((b) => {
@@ -449,7 +524,7 @@ const RENDER = {
 				b.onclick = async () => {
 					if (!(await ask("Delete this file for good?"))) return;
 					const box = b.closest("[data-media]");
-					act(() => api("deleteMedia", { id: box.dataset.media }), "Deleted").then(() => box.remove());
+					act(async () => { await api("deleteMedia", { id: box.dataset.media }); box.remove(); offset--; updateMediaPick(); }, "Deleted");
 				};
 			});
 		};
@@ -935,8 +1010,12 @@ const RENDER = {
 			'<select id="status"><option value="">Any standing</option><option>active</option><option>restricted</option><option>limited</option><option>suspended</option></select>' +
 			HOME_SELECT +
 			'<label class="row small"><input type="checkbox" id="staff"> Staff only</label></div>' +
-			(can("bulkStatus") ? '<div class="bar" id="bulk" hidden><span class="small" id="picked"></span>' +
-				[["active", "Reinstate", ""], ["restricted", "Restrict", ""], ["limited", "Limit", ""], ["suspended", "Suspend", " danger"]].map(([s, l, c]) => '<button class="btn' + c + '" data-bulk="' + s + '">' + l + "</button>").join("") + "</div>" : "") +
+			(can("bulkStatus") || can("bulkStrike") ? '<div class="bar" id="bulk" hidden><span class="small" id="picked"></span>' +
+				(can("bulkStatus") ? [["active", "Reinstate", ""], ["restricted", "Restrict", ""], ["limited", "Limit", ""], ["suspended", "Suspend", " danger"]].map(([s, l, c]) => '<button class="btn' + c + '" data-bulk="' + s + '">' + l + "</button>").join("") : "") +
+				(can("bulkStrike") ? '<button class="btn danger" id="bulkStrikeBtn">Strike</button>' : "") + "</div>" : "") +
+			(can("bulkStrike") ? '<div class="box" id="bulkStrikeBox" hidden><div class="field"><label>Strike message for the ticked accounts</label><textarea id="bulkStrikeBody" maxlength="2000" placeholder="Why they\'re getting this strike"></textarea></div>' +
+				'<label class="row" style="margin:6px 0"><input type="checkbox" id="bulkStrikeEscalate" checked> Strikes count toward suspension</label>' +
+				'<div class="row"><button class="btn primary" id="bulkStrikeSend">Send strikes</button><button class="btn" id="bulkStrikeCancel">Cancel</button></div><div id="bulkStrikeOut"></div></div>' : "") +
 			'<p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
 			'<div class="row" style="margin-top:16px"><button class="btn" id="more" hidden>Show more</button></div>';
 		const picked = () => [...main.querySelectorAll("[data-pick]:checked")].map((c) => c.dataset.pick);
@@ -947,7 +1026,7 @@ const RENDER = {
 			const q = { q: $("#q").value, status: $("#status").value, staff: $("#staff").checked, home: $("#home").value };
 			const { users, total } = await api("users", more === true ? { ...q, offset: shown.length } : more === "same" ? { ...q, limit: Math.max(shown.length, 50) } : q);
 			shown = more === true ? shown.concat(users) : users;
-			$("#list").innerHTML = shown.length ? userTable(shown, false, can("bulkStatus")) : '<div class="empty">No accounts match.</div>';
+			$("#list").innerHTML = shown.length ? userTable(shown, false, can("bulkStatus") || can("bulkStrike")) : '<div class="empty">No accounts match.</div>';
 			keep.forEach((id) => { const c = main.querySelector('[data-pick="' + id + '"]'); if (c) c.checked = true; });
 			$("#total").textContent = total + (total === 1 ? " account" : " accounts") + (shown.length < total ? ", showing " + shown.length : "");
 			$("#more").hidden = shown.length >= total;
@@ -965,6 +1044,22 @@ const RENDER = {
 			if (b.dataset.bulk === "suspended" && !(await ask("Suspend " + ids.length + " accounts?"))) return;
 			act(() => api("bulkStatus", { ids, status: b.dataset.bulk }), "Standing changed").then(() => load("same"));
 		});
+		if ($("#bulkStrikeBtn")) $("#bulkStrikeBtn").onclick = () => { $("#bulkStrikeBox").hidden = false; $("#bulkStrikeBody").focus(); };
+		if ($("#bulkStrikeCancel")) $("#bulkStrikeCancel").onclick = () => { $("#bulkStrikeBox").hidden = true; };
+		if ($("#bulkStrikeSend")) $("#bulkStrikeSend").onclick = async () => {
+			const ids = picked();
+			if (!ids.length) return;
+			if (!(await ask("Give " + ids.length + " accounts a strike?"))) return;
+			$("#bulkStrikeSend").disabled = true;
+			await act(async () => {
+				const { results } = await api("bulkStrike", { ids, body: $("#bulkStrikeBody").value, escalate: $("#bulkStrikeEscalate").checked });
+				const struck = results.filter((r) => r.ok || r.delivered), skipped = results.filter((r) => !r.ok && !r.error), errors = results.filter((r) => r.error);
+				$("#bulkStrikeOut").innerHTML = '<p class="small" style="margin-top:10px">' + struck.length + (struck.length === 1 ? " account" : " accounts") + " struck." +
+					(skipped.length ? " Skipped: " + skipped.map((r) => "@" + esc(r.screen_name || r.id) + " (" + esc(r.why) + ")").join(", ") + "." : "") +
+					(errors.length ? " Errors: " + errors.map((r) => "@" + esc(r.screen_name || r.id) + " (" + esc(r.why) + ")").join(", ") + "." : "") + "</p>";
+			});
+			$("#bulkStrikeSend").disabled = false;
+		};
 		let t;
 		$("#q").oninput = () => { clearTimeout(t); t = setTimeout(() => load(false), 250); };
 		$("#status").onchange = () => load(false);
@@ -1006,11 +1101,16 @@ const RENDER = {
 					["likes", "replies", "reposts", "quotes", "bookmarks", "views"].map((k) => '<label class="small" style="width:30%">' + k + '<input data-k="' + k + '" type="number" min="0" value="' + (c[k] ?? "") + '"></label>').join("") +
 					'</div><button class="btn primary" data-save-counts style="margin-top:8px">Save counts</button></div>' : "") + "</div>";
 		};
-		main.innerHTML = '<h1>Posts</h1><div class="bar"><input id="q" placeholder="Text contains" style="flex:1;min-width:160px"><input id="author" placeholder="@author"></div><p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
+		const pickable = can("deletePost") || can("setPostVisibility");
+		main.innerHTML = '<h1>Posts</h1><div class="bar"><input id="q" placeholder="Text contains" style="flex:1;min-width:160px"><input id="author" placeholder="@author"></div>' +
+			(pickable ? '<div class="bar" id="pbulk" hidden><span class="small" id="ppicked"></span>' +
+				(can("setPostVisibility") ? '<button class="btn" id="phide">Hide</button><button class="btn" id="psens">Mark sensitive</button>' : "") +
+				(can("deletePost") ? '<button class="btn danger" id="pdel">Delete</button>' : "") + "</div>" : "") +
+			'<p class="small" id="presult" role="status"></p><p class="dim small" id="total"></p><div id="list" class="scroll"></div>' +
 			'<div class="row" style="margin-top:16px"><button class="btn" id="more" hidden>Show more</button></div>';
 		// 50 at a time; after an edit the same number is fetched again, a new search starts over
 		let posts = [];
-		const load = async (more) => {
+		const load = async (more, keep = []) => {
 			const q = { q: $("#q").value, author: $("#author").value };
 			const page = more === "new" ? await api("posts", { ...q, offset: 0 })
 				: more === true ? await api("posts", { ...q, offset: posts.length })
@@ -1018,9 +1118,10 @@ const RENDER = {
 			posts = more === true ? posts.concat(page.posts) : page.posts;
 			$("#total").textContent = page.total + (page.total === 1 ? " post" : " posts") + (posts.length < page.total ? ", showing " + posts.length : "");
 			$("#more").hidden = posts.length >= page.total;
+			if ($("#pbulk")) $("#pbulk").hidden = true;
 			$("#list").innerHTML = posts.length
-				? '<table class="table"><tr><th>Post</th><th>Author</th><th>When</th><th></th></tr>' +
-					posts.map((p) => "<tr><td>" + (p.reply_to_id ? '<span class="dim small">reply · </span>' : "") + esc(p.text || "(no text)") + (p.media ? ' <span class="dim small">· ' + p.media + " media</span>" : "") +
+				? '<table class="table"><tr>' + (pickable ? '<th style="width:32px"></th>' : "") + '<th>Post</th><th>Author</th><th>When</th><th></th></tr>' +
+					posts.map((p) => "<tr>" + (pickable ? '<td><input type="checkbox" data-ppick="' + esc(p.id) + '"></td>' : "") + "<td>" + (p.reply_to_id ? '<span class="dim small">reply · </span>' : "") + esc(p.text || "(no text)") + (p.media ? ' <span class="dim small">· ' + p.media + " media</span>" : "") +
 						(p.hidden ? ' <span class="pill suspended">hidden</span>' : "") + (p.sensitive ? ' <span class="pill restricted">sensitive</span>' : "") +
 						(p.notice ? ' <span class="pill restricted">' + esc(NOTICE_LABELS[p.notice.type] || p.notice.type) + "</span>" : "") + (p.count_overrides ? ' <span class="pill">counts set</span>' : "") +
 						'<div class="dim small">' + p.likes + ' likes · <a href="/' + esc(p.screen_name) + "/status/" + esc(p.id) + '" target="_blank">open</a></div></td><td><a href="#user/' + esc(p.user_id) + '">@' + esc(p.screen_name) + '</a></td><td class="small dim">' + esc(when(p.created_at)) + "</td><td>" +
@@ -1029,8 +1130,13 @@ const RENDER = {
 								'<button class="btn" data-vis="' + esc(p.id) + '" data-hidden="' + !!p.hidden + '" data-sensitive="' + !p.sensitive + '" title="Media behind a content warning">' + (p.sensitive ? "Not sensitive" : "Sensitive") + "</button>" : "") +
 							(can("setPostNotice") || can("setPostCounts") ? '<button class="btn" data-edit="' + esc(p.id) + '">Edit</button>' : "") +
 							(can("deletePost") ? '<button class="btn danger" data-del="' + esc(p.id) + '">Delete</button>' : "") + "</div></td></tr>" +
-						'<tr data-editor="' + esc(p.id) + '" hidden><td colspan="4">' + postEditor(p) + "</td></tr>").join("") + "</table>"
+						'<tr data-editor="' + esc(p.id) + '" hidden><td colspan="' + (pickable ? 5 : 4) + '">' + postEditor(p) + "</td></tr>").join("") + "</table>"
 				: '<div class="empty">No posts match.</div>';
+			keep.forEach((id) => { const c = main.querySelector('[data-ppick="' + id + '"]'); if (c) c.checked = true; });
+			if ($("#pbulk")) {
+				$("#pbulk").hidden = !keep.length;
+				$("#ppicked").textContent = keep.length + " selected:";
+			}
 			$("#list").querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
 				const row = $("#list").querySelector('[data-editor="' + b.dataset.edit + '"]');
 				row.hidden = !row.hidden;
@@ -1050,9 +1156,33 @@ const RENDER = {
 				act(() => api("deletePost", { id: b.dataset.del }), "Post deleted").then(load);
 			});
 		};
+		const ppicked = () => [...main.querySelectorAll("[data-ppick]:checked")].map((c) => c.dataset.ppick);
+		main.addEventListener("change", (e) => {
+			if (!e.target.matches("[data-ppick]") || !$("#pbulk")) return;
+			const n = ppicked().length;
+			$("#pbulk").hidden = !n;
+			$("#ppicked").textContent = n + " selected:";
+		});
+		main.querySelectorAll("#phide, #psens, #pdel").forEach((button) => button.onclick = async () => {
+			const ids = ppicked();
+			const action = button.id === "pdel" ? "Delete" : button.id === "phide" ? "Hide" : "Mark sensitive";
+			if (!ids.length || !(await ask(action + " " + ids.length + " posts?"))) return;
+			main.querySelectorAll("#pbulk button").forEach((b) => b.disabled = true);
+			const failures = [];
+			for (const id of ids) {
+				try {
+					const post = posts.find((p) => p.id === id);
+					if (button.id === "pdel") await api("deletePost", { id });
+					else await api("setPostVisibility", { id, hidden: button.id === "phide" || !!post.hidden, sensitive: button.id === "psens" || !!post.sensitive });
+				} catch (e) { failures.push({ id, why: e.message }); }
+			}
+			$("#presult").textContent = (ids.length - failures.length) + " succeeded, " + failures.length + " failed." + (failures.length ? " " + failures.map((f) => f.id + ": " + f.why).join("; ") : "");
+			try { await load(false, failures.map((f) => f.id)); } catch (e) { notice("Could not refresh posts: " + e.message, true); }
+			main.querySelectorAll("#pbulk button").forEach((b) => b.disabled = false);
+		});
 		let t;
 		$("#q").oninput = $("#author").oninput = () => { clearTimeout(t); t = setTimeout(() => load("new"), 250); };
-		$("#more").onclick = () => load(true);
+		$("#more").onclick = () => load(true, ppicked());
 		await load("new");
 	},
 
@@ -1103,7 +1233,7 @@ const RENDER = {
 	},
 
 	async settings(main) {
-		const [{ settings: s, features, branding, slots }, { operations: o, automod: am }] = await Promise.all([api("settings"), api("operations")]);
+		const [{ settings: s, features, branding, slots, compression }, { operations: o, automod: am }] = await Promise.all([api("settings"), api("operations")]);
 		const admin = can("admin");
 		const dis = admin ? "" : " disabled";
 		const modes = { invite: "Invite only: a code is needed", open: "Open: anyone can sign up, codes optional", closed: "Closed: no new accounts" };
@@ -1122,6 +1252,18 @@ const RENDER = {
 			[["image_mb", "Image size, MB"], ["video_mb", "Video size, MB"], ["video_seconds", "Video length, seconds"]]
 				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" data-limit="' + k + '" value="' + esc(s.limits[k]) + '"' + dis + "></div>").join("") +
 			(admin ? '<button class="btn primary" id="saveLimits">Save</button>' : "") + "</div>" +
+			'<div class="box"><h2>Media storage</h2><p class="dim small">Compression makes photos and videos smaller as they are stored, so the instance needs less disk and pages load faster. Photos are fitted inside the size below and saved again as JPEG (PNG when see-through); videos are encoded again. A file is only replaced when that made it smaller. GIFs and animated images stay as they are.</p>' +
+			'<label class="row" style="margin:6px 0"><input type="checkbox" id="mediaCompress"' + (s.media.compress ? " checked" : "") + dis + "> Compress uploads</label>" +
+			// the sizes the app asks for (small, 900x900, medium, large, 4096x4096); the
+			// photo is stored at this size only, and every view gets it
+			'<div class="field"><label>Photo size: the stored photo is shrunk to this and the original is not kept</label><select data-media="photo_max_side"' + dis + ">" +
+			[[680, "680 pixels: small, enough for phones"], [900, "900 pixels"], [1200, "1200 pixels: medium"], [2048, "2048 pixels: large, the most the app shows (default)"], [4096, "4096 pixels: close to most originals"]]
+				.map(([v, l]) => '<option value="' + v + '"' + (s.media.photo_max_side === v ? " selected" : "") + ">" + esc(l) + "</option>").join("") + "</select></div>" +
+			[["photo_quality", "Photo quality, 30 to 100 (80 looks the same to most people)"], ["video_max_side", "Video longest side, pixels (720 is small, 1280 is HD)"], ["video_crf", "Video quality, 18 to 40 (lower is better and bigger: 23 is close to the original, 28 is small)"]]
+				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" data-media="' + k + '" value="' + esc(s.media[k]) + '"' + dis + "></div>").join("") +
+			(admin ? '<button class="btn primary" id="saveMedia">Save</button>' : "") +
+			'<p class="dim small" id="sweepState" style="margin-top:16px">' + esc(sweepText(compression)) + "</p>" +
+			(admin ? '<button class="btn" id="compressStored">Compress stored files</button>' : "") + "</div>" +
 			'<div class="box"><h2>Rate limits</h2><p class="dim small">Requests per account per 15 minutes. Staff have no limits. Hitting one shows the app\'s "try again later" and a line in the server log.</p>' +
 			[["read", "Any request (a page load is about 30)"], ["endpoint", "Any one kind of request (a stuck page loses only that)"], ["write", "Other changes (settings, deletes, lists…)"], ["post", "Posts and replies"], ["engage", "Likes, reposts, bookmarks, follows"], ["dm", "Messages sent"], ["upload", "Files uploaded"]]
 				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" min="1" data-rate="' + k + '" value="' + esc(s.rate_limits[k]) + '"' + dis + "></div>").join("") +
@@ -1200,7 +1342,20 @@ const RENDER = {
 				act(() => api("decideArchiveImport", { userId: b.dataset.aiDecline, approve: false, reason }), "Declined; the archive was deleted").then(route);
 			});
 		}, () => { $("#aiPending").textContent = "Couldn't load the imports."; });
+		// the sweep runs in the background; its line follows it while the page is open
+		const sweepLine = $("#sweepState");
+		const followSweep = (c) => {
+			sweepLine.textContent = sweepText(c);
+			if (c.running) setTimeout(() => sweepLine.isConnected && api("compressionState").then((r) => followSweep(r.compression), () => {}), 3000);
+		};
+		followSweep(compression);
 		if (!admin) return;
+		$("#saveMedia").onclick = () => {
+			const m = { compress: $("#mediaCompress").checked };
+			main.querySelectorAll("[data-media]").forEach((i) => m[i.dataset.media] = i.value);
+			save({ media: m }, m.compress ? "Saved; new uploads are compressed" : "Saved");
+		};
+		$("#compressStored").onclick = () => act(() => api("compressStored"), "Compressing stored files in the background").then((r) => r && followSweep(r.compression));
 		$("#saveFollows").onclick = () => save({ default_follows: $("#follows").value.split(",").map((x) => x.trim()).filter(Boolean) }, "Saved");
 		$("#saveName").onclick = () => save({ instance_name: $("#name").value, source_url: $("#source").value }, "Saved");
 		$("#saveFeatures").onclick = () => {
@@ -1322,7 +1477,7 @@ const RENDER = {
 	async audit(main, filter = {}) {
 		const { entries } = await api("audit", filter);
 		main.innerHTML = '<h1>Audit log</h1><div class="bar"><input id="auditWho" placeholder="@handle" value="' + esc(filter.target || "") + '">' +
-			'<select id="auditAction"><option value="">Every action</option>' + ["automod_strike", "automod_second_chance", "escalate", "expire_sanction", "auto_suspend_name", "temporary_status", "set_status", "bulk_status", "send_staff_message", "revoke_strike", "resolve_appeal", "save_automod", "set_role", "set_staff_permissions"]
+			'<select id="auditAction"><option value="">Every action</option>' + ["automod_strike", "automod_second_chance", "escalate", "expire_sanction", "auto_suspend_name", "temporary_status", "set_status", "bulk_status", "send_staff_message", "revoke_strike", "bulk_strike", "resolve_appeal", "save_automod", "set_role", "set_staff_permissions"]
 				.map((a) => '<option value="' + a + '"' + (filter.action === a ? " selected" : "") + ">" + a.replace(/_/g, " ") + "</option>").join("") + "</select>" +
 			'<label class="row"><input type="checkbox" id="auditAuto"' + (filter.automatic ? " checked" : "") + '> Automatic only</label><button class="btn" id="auditGo">Filter</button></div><div class="scroll">' + (entries.length
 			? '<table class="table"><tr><th>When</th><th>Who</th><th>Did</th><th>To</th><th>Details</th></tr>' +
@@ -1381,7 +1536,11 @@ async function renderUser(main, id) {
 		'<p><a href="#users">← Users</a></p>' + person(u) +
 		'<p class="dim small">Joined ' + esc(when(u.created_at)) + " · last sign-in " + esc(when(u.last_seen_at)) + " · " + u.posts + " posts · " + u.followers + " followers · " + u.sessions + " active sessions" +
 		(u.invite_code ? " · invite " + '<span class="code">' + esc(u.invite_code) + "</span>" : u.invited_by ? " · invited" : "") + (u.invited_by ? " from @" + esc(u.invited_by) : "") +
-		(u.org ? " · affiliate of @" + esc(u.org) : "") + ' · <a href="/' + esc(u.screen_name) + '" target="_blank">open profile</a></p>' +
+		(u.org ? " · affiliate of @" + esc(u.org) : "") + ' · <a href="/' + esc(u.screen_name) + '" target="_blank">open profile</a>' +
+		// straight to the files, instead of searching the Media page for them
+		(u.avatar_url ? ' · <a href="' + esc(u.avatar_url) + '" target="_blank">profile picture</a>' : "") +
+		(u.banner_url ? ' · <a href="' + esc(u.banner_url) + '" target="_blank">banner</a>' : "") +
+		(can("media") ? ' · <a href="#media/' + esc(u.id) + '">all media</a>' : "") + "</p>" +
 		(u.instance ? '<div class="box" style="margin-bottom:16px">This account lives on <b>' + esc(u.instance) + "</b>, which manages its profile, password and role. Here you can moderate it: suspend it, hide its posts or delete the copy.</div>" : "") +
 		'<div class="grid2">' +
 		// profile
@@ -1390,7 +1549,7 @@ async function renderUser(main, id) {
 			.map(([k, l, v]) => '<div class="field"><label>' + l + '</label><input data-f="' + k + '" value="' + esc(v) + '"' + (canHere("updateUser") ? "" : " disabled") + "></div>").join("") +
 		'<div class="field"><label>Bio</label><textarea data-f="bio"' + (canHere("updateUser") ? "" : " disabled") + ">" + esc(u.bio) + "</textarea></div>" +
 		'<div class="field"><label>Account based in (About this account; blank shows the detected region' + (u.country ? ", " + esc(u.country) : "") + ')</label><input data-f="based_in" maxlength="50" value="' + esc(u.based_in_override ?? "") + '"' + (canHere("updateUser") ? "" : " disabled") + "></div>" +
-		'<div class="field"><label>Joined from (after the date joined in About this account; a country or its code, like SE; blank hides it)</label><input data-f="joined_from" maxlength="60" value="' + esc(u.joined_from ?? "") + '"' + (canHere("updateUser") ? "" : " disabled") + "></div>" +
+		'<div class="field"><label>Joined from (after the date joined in About this account; a country, its code like SE, or a custom name; blank hides it)</label><input data-f="joined_from" maxlength="60" value="' + esc(u.joined_from ?? "") + '"' + (canHere("updateUser") ? "" : " disabled") + "></div>" +
 		(canHere("updateUser") ? '<button class="btn primary" id="save">Save profile</button>' : "") +
 		(canHere("setUserCounts") ? '<h2 style="margin-top:20px">Shown counts</h2><p class="dim small">Blank shows the real number. Only the number on the profile changes, not the lists.</p><div class="row">' +
 			["followers", "following"].map((k) => '<label class="small" style="flex:1">' + k + '<input data-count="' + k + '" type="number" min="0" value="' + ((u.count_overrides || {})[k] ?? "") + '"></label>').join("") +
@@ -1402,9 +1561,10 @@ async function renderUser(main, id) {
 		[["", "none"], ["translator", "blue (translator)"], ["moderator", "gold (translator moderator)"], ["approver", "yellow (approver)"]].map(([v, l]) => '<option value="' + v + '"' + ((u.translator ?? "") === v ? " selected" : "") + ">" + l + "</option>").join("") +
 		'</select></div><div class="field"><label>Profile label (under the name, where X shows "Parody account"; <a href="#badges">make one</a>)</label><select id="plabel"' + (can("setProfileLabel") ? "" : " disabled") + ">" +
 		[["None", "none"], ["Parody", "Parody account"], ["Commentary", "Commentary account"], ["Fan", "Fan account"]].concat(labels.map((l) => [l.id, l.text])).map(([v, l]) => '<option value="' + esc(v) + '"' + ((u.label_id || u.parody_label || "None") === v ? " selected" : "") + ">" + esc(l) + "</option>").join("") +
-		'</select></div><div class="field"><label>Pride flag</label><div class="flags" id="flags">' +
-		[{ id: "", name: "none" }].concat(flags).map((f) => '<button type="button" title="' + esc(f.name) + '" data-flag="' + esc(f.id) + '" class="' + ((u.flag ?? "") === f.id ? "on" : "") + '"' + (can("setFlag") ? "" : " disabled") + ">" +
-			(f.id ? '<img alt="" src="/public/flag-' + esc(f.id) + '.svg">' : "none") + "</button>").join("") + "</div></div>" +
+		'</select></div><div class="field"><label>Pride flags, up to 4, in the order they show</label><div class="flags" id="flags">' +
+		[{ id: "", name: "none" }].concat(flags).map((f) => '<button type="button" title="' + esc(f.name) + '" data-flag="' + esc(f.id) + '"' + (can("setFlag") ? "" : " disabled") + ">" +
+			(f.id ? '<img alt="" src="/public/flag-' + esc(f.id) + '.svg">' : "none") + "</button>").join("") + "</div>" +
+		(can("setFlag") ? '<div class="row" style="margin-top:8px"><button class="btn primary" id="saveFlags" disabled>Save flags</button><span class="dim small" id="flagState"></span></div>' : '<p class="dim small">Requires permission to set flags.</p>') + "</div>" +
 		(u.decor ? '<div class="field"><label>Profile decor from Steam</label><div class="dim small">' +
 			esc([u.decor.profile && "game profile " + u.decor.profile.name, u.decor.theme && "theme " + u.decor.theme, u.decor.background && "background " + u.decor.background.name, u.decor.frame && "frame " + u.decor.frame.name].filter(Boolean).join(" · ")) +
 			"</div>" + (canHere("resetDecor") ? '<button class="btn" id="resetDecor" style="margin-top:6px">Reset decor</button>' : "") + "</div>" : "") +
@@ -1469,7 +1629,27 @@ async function renderUser(main, id) {
 	if ($("#badge")) $("#badge").onchange = () => act(() => api("setBadge", { id, badge: $("#badge").value }), "Badge set").then(again);
 	if ($("#plabel")) $("#plabel").onchange = () => act(() => api("setProfileLabel", { id, label: $("#plabel").value }), "Label set").then(again);
 	if ($("#translator")) $("#translator").onchange = () => act(() => api("setTranslator", { id, translator: $("#translator").value }), "Translator badge set").then(again);
-	main.querySelectorAll("[data-flag]").forEach((b) => b.onclick = () => act(() => api("setFlag", { id, flag: b.dataset.flag }), "Flag set").then(again));
+	if ($("#flags")) {
+		let picked = (u.flag ?? "").split(",").filter(Boolean);
+		const drawFlags = () => {
+			main.querySelectorAll("[data-flag]").forEach((b) => {
+				const i = picked.indexOf(b.dataset.flag);
+				b.classList.toggle("on", b.dataset.flag === "" ? !picked.length : i >= 0);
+				b.querySelector(".ord")?.remove();
+				if (i >= 0) b.insertAdjacentHTML("beforeend", '<span class="ord">' + (i + 1) + "</span>");
+			});
+			if ($("#saveFlags")) $("#saveFlags").disabled = picked.join(",") === (u.flag ?? "");
+			if ($("#flagState")) $("#flagState").textContent = picked.length ? "Showing: " + picked.map((f) => flags.find((x) => x.id === f)?.name ?? f).join(", ") + "." : "No flags.";
+		};
+		main.querySelectorAll("[data-flag]").forEach((b) => b.onclick = () => {
+			if (b.dataset.flag === "") picked = [];
+			else if (picked.includes(b.dataset.flag)) picked = picked.filter((f) => f !== b.dataset.flag);
+			else if (picked.length < 4) picked.push(b.dataset.flag);
+			drawFlags();
+		});
+		if ($("#saveFlags")) $("#saveFlags").onclick = () => act(() => api("setFlag", { id, flag: picked.join(",") }), "Flags saved").then(again);
+		drawFlags();
+	}
 	if ($("#resetDecor")) $("#resetDecor").onclick = async () => {
 		if (!(await ask("Take off @" + u.screen_name + "'s profile decor?"))) return;
 		act(() => api("resetDecor", { id }), "Decor reset").then(again);

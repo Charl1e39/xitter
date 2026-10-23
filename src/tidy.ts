@@ -47,6 +47,9 @@ const ALWAYS = [
 	// the signed-out home page's footer keeps Terms and Privacy (our rules page)
 	'nav[aria-label="Footer"] > div:has(> a[href^="http"]:not([href$="/tos"]):not([href$="/privacy"]))',
 	'nav[aria-label="Footer"] > div:has(> a[href^="/i/jf/stories"])',
+	// a menu's divider with nothing after it (the More menu ends with one, the
+	// entries it led to being gone)
+	'[role="menu"] [data-testid="Dropdown"] div:has(> [role="separator"]):last-child',
 ];
 
 export function hideCss(): string {
@@ -84,9 +87,11 @@ export const MONEY_ICON_FILLED = "M10.80 4.20L14 4.20L13.65 5.70L17.65 5.70L16.9
 const TONE = "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 1.8v14.4a7.2 7.2 0 0 0 0-14.4z";
 const GIF = "M120-120v-720h720v720H120Zm80-80h560v-560H200v560Zm80-80h400L560-520 440-360l-80-100-80 180Zm40-280q25 0 42.5-17.5T380-700q0-25-17.5-42.5T320-760q-25 0-42.5 17.5T260-700q0 25 17.5 42.5T320-660Z";
 const CAT = "M5 3.5 9.2 7.6A9 9 0 0 1 12 7.2a9 9 0 0 1 2.8.4L19 3.5V12a7 7 0 0 1-14 0V3.5Zm4.5 8.3a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm5 0a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z";
+// four tiles: the admin panel
+const PANEL = "M3 3h8v10H3V3zm2 2v6h4V5H5zm8-2h8v6h-8V3zm2 2v2h4V5h-4zM3 15h8v6H3v-6zm2 2v2h4v-2H5zm8-4h8v8h-8v-8zm2 2v4h4v-4h-4z";
 const KEY = "M280-400q-33 0-56.5-23.5T200-480q0-33 23.5-56.5T280-560q33 0 56.5 23.5T360-480q0 33-23.5 56.5T280-400Zm0 160q-100 0-170-70T40-480q0-100 70-170t170-70q67 0 121.5 33t86.5 87h352l120 120-180 180-80-60-80 60-85-60h-47q-32 54-86.5 87T280-240Zm0-80q56 0 98.5-34t56.5-86h125l58 41 82-61 71 55 75-75-40-40H435q-14-52-56.5-86T280-640q-66 0-113 47t-47 113q0 66 47 113t113 47Z";
 const GLOBE = "M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q41-45 62.5-100.5T800-480q0-98-54.5-179T600-776v16q0 33-23.5 56.5T520-680h-80v80q0 17-11.5 28.5T400-560h-80v80h240q17 0 28.5 11.5T600-440v120h40q26 0 47 15.5t29 40.5Z";
-// Every link is a tab on the account pages. `where` adds it to the client too:
+// Every link under /account/ is a tab on the account pages. `where` adds it to the client too:
 // the More menu, Settings > Your account, or both. The menu keeps only what
 // someone may need to act on; the rest live in Settings. "nav" is an entry of
 // its own in the side bar, its page filling the main column.
@@ -105,7 +110,7 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	const [u] = await sql`select ${isOrganizationSql(sql`u`)}
 			or exists (select 1 from affiliations where user_id = u.id) or exists (select 1 from affiliation_requests where user_id = u.id) as org,
 		exists (select 1 from staff_messages where user_id = u.id and revoked_at is null) or exists (select 1 from moderation_appeals where user_id = u.id) as notices,
-		coalesce(u.verified_type in ('business', 'government', 'government_individual'), false) as gold
+		coalesce(u.verified_type in ('business', 'government', 'government_individual'), false) as gold, u.role
 		from users u where u.id = ${userId}::bigint`;
 	if (u?.org) links.push({ href: "/account/organisation", text: "Organisation", description: "Manage affiliates, or answer an organisation that asked to add you.", icon: BUILDING, where: "both" });
 	if (u?.gold) links.push({ href: "/account/decor", text: "Profile decor", description: "Dress your profile with a theme, background and avatar frame from Steam.", icon: PALETTE, viewBox: "0 -960 960 960", where: "settings" });
@@ -120,6 +125,8 @@ export async function menuLinks(userId: string): Promise<MenuLink[]> {
 	links.push({ href: "/account/migrate", text: "Move account", description: "Bring your account here from another instance, or take it to another one.", icon: MOVE, where: "settings" });
 	links.push({ href: "/account/api", text: "API", description: "Make tokens that let scripts and bots use your account.", icon: CODE, viewBox: "0 -960 960 960", where: "settings" });
 	links.push({ href: "/account/notes/appeals", text: "Note appeals", description: "Appeal a Community Note or review appeals as staff.", icon: SHIELD, where: "settings" });
+	// staff reach the panel from the menu; the panel itself still asks what staffGate asks
+	if (u?.role) links.push({ href: "/admin", text: "Admin", description: `Reports, accounts and ${s.instance_name}'s settings.`, icon: PANEL, where: "menu" });
 	return links;
 }
 
@@ -354,6 +361,8 @@ export const TIDY_SCRIPT = `(function(){
 		a.setAttribute("href",to);a.setAttribute("data-xitter-link","");
 		a.addEventListener("click",function(e){
 			e.preventDefault();e.stopPropagation();
+			// the admin panel is a page of its own, outside the client
+			if(to==="/admin"){location.assign(to);return}
 			// the menu shuts when its full-screen backdrop is clicked, not on a page change
 			var menu=a.closest('[role="menu"]');
 			if(menu)[].forEach.call(menu.parentNode.children,function(c){if(c!==menu&&getComputedStyle(c).position==="fixed")c.click()});
