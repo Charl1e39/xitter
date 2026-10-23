@@ -306,8 +306,8 @@ export type Request = { id: string; amount: number | null; note: string; status:
 export async function requests(ids: string[], visibleTo?: string): Promise<Map<string, Request>> {
 	if (!ids.length) return new Map();
 	const rows = await sql`select q.id::text, q.amount_cents, q.note, q.status, q.created_at, q.requester_id::text, q.payer_id::text,
-			(select count(*)::int from money_transfers t where t.request_id = q.id) as paid_count,
-			(select coalesce(sum(amount_cents), 0)::bigint from money_transfers t where t.request_id = q.id) as paid_cents
+			(select count(*)::int from money_transfers t where t.request_id = q.id and t.reversed_at is null) as paid_count,
+			(select coalesce(sum(t.amount_cents), 0)::bigint from money_transfers t where t.request_id = q.id and t.reversed_at is null) as paid_cents
 		from money_requests q where q.id = any(${sql.array(ids, "INT8")})
 		${
 			visibleTo
