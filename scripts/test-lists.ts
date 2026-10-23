@@ -2,6 +2,9 @@
 // timeline, subscribe, privacy, pinning, delete. Removes what it creates.
 // usage: bun scripts/test-lists.ts <user A> <user B> <password of both>
 
+import { sql } from "../src/db";
+import { newId } from "../src/ids";
+
 export {};
 
 const origin = `http://localhost:${process.env.PORT ?? 3000}`;
@@ -61,6 +64,23 @@ check("list timeline hides non-members", !tweetIds.includes(other));
 
 const members = entriesOf((await a.get("ListMembers", { listId: id, count: 20 })).data.list.members_timeline.timeline);
 check("members list", members.some((e) => e.content?.itemContent?.user_results?.result?.rest_id === userB.rest_id));
+
+// suggested members also have more than one page
+const recTag = Date.now().toString(36);
+const recIds = Array.from({ length: 21 }, () => newId());
+for (const [i, userId] of recIds.entries()) {
+	await sql`insert into users (id, screen_name, name, password_hash) values (${userId}::bigint, ${`rf${recTag}${i}`}, ${`Suggested ${i}`}, 'x')`;
+	await sql`insert into follows (follower_id, followee_id) values (${userA.rest_id}::bigint, ${userId}::bigint)`;
+}
+const suggestedIds = (entries: any[]) => entries.flatMap((e) => (e.content?.itemContent?.user_results?.result?.rest_id ? [e.content.itemContent.user_results.result.rest_id] : []));
+const recFirst = entriesOf((await a.get("ListEditRecommendedUsers", { listId: id, count: 20 })).data.list.recommended_users.timeline);
+const recFirstIds = suggestedIds(recFirst);
+const recBottom = recFirst.find((e) => e.content?.cursorType === "Bottom")?.content?.value;
+const recSecond = recBottom ? entriesOf((await a.get("ListEditRecommendedUsers", { listId: id, count: 20, cursor: recBottom })).data.list.recommended_users.timeline) : [];
+const recSecondIds = suggestedIds(recSecond);
+const suggested = new Set([...recFirstIds, ...recSecondIds]);
+check("suggested members page past 20", recFirstIds.length === 20 && recSecondIds.length === 1 && recIds.every((u) => suggested.has(u)), { first: recFirstIds.length, second: recSecondIds.length, bottom: recBottom });
+await sql`delete from users where screen_name like ${`rf${recTag}%`}`;
 
 const owned = await a.get("ListOwnerships", { userId: userA.rest_id, isListMemberTargetUserId: userB.rest_id, count: 100 });
 const ownedList = listsIn(owned.data.user.result.timeline.timeline).find((l) => l.id_str === id);
