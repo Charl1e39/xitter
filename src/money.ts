@@ -41,9 +41,38 @@ export const shortCents = (cents: number) => (cents % 100 ? formatCents(cents) :
 
 export const date = (d: Date) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(new Date(d).getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 
+// The economy in force. With money.follow_network on, the starting balance,
+// like reward and largest payment are xitter.space's (money-federation.ts
+// fetches them), so every instance that follows it makes money at one rate.
+type Economy = { starting_cents: number; max_transfer_cents: number; like_cents: number };
+let network: Economy | null = null;
+export const networkEconomy = () => network;
+export function setNetworkEconomy(e: Economy) {
+	network = e;
+}
+export function economy(): Economy {
+	const m = settings().money;
+	return m.follow_network && network ? network : m;
+}
+
+// What one peer brought in over the last day, its transfers and the rewards for
+// its accounts' likes, held to money.peer_daily_cents. Callers take lockPeer in
+// their transaction first, so two arrivals can't both fit under the limit.
+export async function lockPeer(db: typeof sql, origin: string) {
+	await db`select pg_advisory_xact_lock(hashtext(${`money-peer:${origin}`}))`;
+}
+export async function peerHasRoom(db: typeof sql, origin: string, cents: number) {
+	const cap = settings().money.peer_daily_cents;
+	if (!(cap > 0)) return true;
+	const [r] = await db`select
+		(select coalesce(sum(amount_cents), 0) from money_federation_receipts where origin = ${origin} and not move and created_at > now() - interval '1 day') +
+		(select coalesce(sum(w.cents), 0) from money_like_rewards w join users u on u.id = w.liker_id where u.instance = ${origin} and w.created_at > now() - interval '1 day') as n`;
+	return Number(r.n) + cents <= cap;
+}
+
 // the wallet's row, made with the starting balance the first time
 async function ensureWallet(userId: string, db: typeof sql = sql) {
-	await db`insert into money_wallets (user_id, balance_cents) values (${userId}::bigint, ${settings().money.starting_cents})
+	await db`insert into money_wallets (user_id, balance_cents) values (${userId}::bigint, ${economy().starting_cents})
 		on conflict (user_id) do nothing`;
 }
 
@@ -98,7 +127,7 @@ function checkNote(note: string) {
 // open, for this payer, to its requester, for its amount.
 export async function sendMoney(senderId: string, handle: string, amountCents: number, note: string, idem: string, requestId?: string): Promise<{ id: string; to: string; repeated: boolean }> {
 	if (!Number.isSafeInteger(amountCents) || amountCents <= 0) throw new MoneyError("Enter an amount over $0.");
-	const max = settings().money.max_transfer_cents;
+	const max = economy().max_transfer_cents;
 	if (amountCents > max) throw new MoneyError(`You can send up to ${formatCents(max)} at a time.`);
 	note = checkNote(note);
 	if (!/^[\w-]{8,64}$/.test(idem)) throw new MoneyError("The form expired. Try again.");
@@ -183,7 +212,7 @@ export async function requestMoney(requesterId: string, from: string, amountText
 	note = checkNote(note);
 	const amount = amountText.trim() ? parseAmount(amountText) : null;
 	if (amountText.trim() && !amount) throw new MoneyError("Enter an amount, like 5 or 12.50.");
-	if (amount && amount > settings().money.max_transfer_cents) throw new MoneyError(`You can ask for up to ${formatCents(settings().money.max_transfer_cents)} at a time.`);
+	if (amount && amount > economy().max_transfer_cents) throw new MoneyError(`You can ask for up to ${formatCents(economy().max_transfer_cents)} at a time.`);
 	let payer: { id: string; screen_name: string } | null = null;
 	if (from.trim()) {
 		payer = await accountFor(from);
@@ -231,9 +260,10 @@ export async function adjust(viewer: Viewer, handle: string, cents: number) {
 
 // A like on a local post earns its author money.like_cents, once per post and
 // account, including likes relayed from a peer. Unliking and liking again pays
-// nothing more. Likes from suspended accounts don't count.
+// nothing more. Likes from suspended accounts don't count, and a peer's likes
+// stop paying once it reaches money.peer_daily_cents for the day.
 export async function rewardLike(likerId: string, postId: string, likerInstance?: string) {
-	const cents = settings().money.like_cents;
+	const cents = economy().like_cents;
 	if (!feature("money") || !(cents > 0)) return;
 	await sql.begin(async (tx) => {
 		const [p] = likerInstance
@@ -242,11 +272,39 @@ export async function rewardLike(likerId: string, postId: string, likerInstance?
 			: await tx`select p.user_id::text as author from posts p join users a on a.id = p.user_id join users l on l.id = ${likerId}::bigint
 				where p.id = ${postId}::bigint and a.instance is null and l.instance is null and l.status <> 'suspended'`;
 		if (!p || p.author === likerId) return;
+		if (likerInstance) {
+			await lockPeer(tx, likerInstance);
+			if (!(await peerHasRoom(tx, likerInstance, cents))) return;
+		}
 		const paid = await tx`insert into money_like_rewards (post_id, liker_id, author_id, cents) values (${postId}::bigint, ${likerId}::bigint, ${p.author}::bigint, ${cents})
 			on conflict do nothing returning 1`;
 		if (!paid.length) return;
 		await ensureWallet(p.author, tx);
 		await tx`update money_wallets set balance_cents = balance_cents + ${cents} where user_id = ${p.author}::bigint`;
+	});
+}
+
+// An account that moved to another instance (migration.ts) takes its balance
+// along when money.move_balance is on: all of it in one transfer marked as a
+// move, which the new instance takes past its limits once it finds the move.
+// Refused, it comes back here like any failed transfer.
+export async function moveBalance(userId: string, to: string) {
+	if (!feature("money") || !settings().money.move_balance) return;
+	const dest = await accountFor(to);
+	if (!dest?.instance || !dest.remote_id) {
+		console.error(`Equicoins: no account @${to} to move a balance to`);
+		return;
+	}
+	await sql.begin(async (tx) => {
+		const [w] = await tx`select balance_cents from money_wallets where user_id = ${userId}::bigint for update`;
+		const amount = Number(w?.balance_cents ?? 0);
+		if (amount <= 0) return;
+		const id = newId();
+		await tx`update money_wallets set balance_cents = 0 where user_id = ${userId}::bigint`;
+		await tx`insert into money_transfers (id, sender_id, recipient_id, amount_cents, note, idem, federation_status)
+			values (${id}::bigint, ${userId}::bigint, ${dest.id}::bigint, ${amount}, ${`Moved to @${to}`}, ${`move:${id}`}, 'pending')`;
+		await tx`insert into money_federation_outbox (transfer_id, destination, sender_id, recipient_id, amount_cents, note, move)
+			values (${id}::bigint, ${dest.instance}, ${userId}::bigint, ${dest.remote_id}::bigint, ${amount}, '', true)`;
 	});
 }
 

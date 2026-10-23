@@ -19,6 +19,7 @@ import {
 	disclaimerAccepted,
 	disclaimerText,
 	date,
+	economy,
 	face,
 	formatCents,
 	merchantOf,
@@ -299,7 +300,7 @@ async function home(req: Request, viewer: Viewer, status = 200, notice = "", err
 				})
 				.join("\n")
 		: `<p class="empty">No activity yet.<br>Equicoins you send, receive and earn shows up here.</p>`;
-	const likes = settings().money.like_cents;
+	const likes = economy().like_cents;
 	return page(
 		req,
 		viewer,

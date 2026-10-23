@@ -99,7 +99,11 @@ const DEFAULTS = {
 	// money.ts: what a new wallet holds and the most one transfer moves, in cents
 	// like_cents: what a post's author earns for each like (once per post and account)
 	// feed: the handle of a local account that posts every payment ("" for none)
-	money: { starting_cents: 500, max_transfer_cents: 100_000, like_cents: 50, feed: "" },
+	// follow_network: take the starting balance, like reward and largest payment from xitter.space
+	// peer_daily_cents: most taken in from one peer a day, its transfers and likes (0: no limit)
+	// move_balance: an account moving away takes its balance along
+	// network_totals: share this instance's totals with peers and show the network's
+	money: { starting_cents: 500, max_transfer_cents: 100_000, like_cents: 50, feed: "", follow_network: false, peer_daily_cents: 0, move_balance: true, network_totals: false },
 	// money shop: listings are in money_shop_items; only approved announcements are shown
 	money_shop: { enabled: false, announcement: null as null | { id: string; text: string; buttons: { label: string; url: string }[] } },
 	// the client's own feature switches, set by an admin (Admin > Feature

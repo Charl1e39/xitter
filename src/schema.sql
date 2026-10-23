@@ -1621,6 +1621,11 @@ create table if not exists money_federation_receipts (
 	created_at timestamptz not null default now(),
 	primary key (origin, transfer_id)
 );
+-- what each peer sent, for money.peer_daily_cents; a moved account's balance doesn't count
+alter table money_federation_receipts add column if not exists amount_cents bigint not null default 0;
+alter table money_federation_receipts add column if not exists move boolean not null default false;
+create index if not exists money_federation_receipts_day_idx on money_federation_receipts (origin, created_at);
+alter table money_federation_outbox add column if not exists move boolean not null default false;
 create unique index if not exists money_transfers_idem_idx on money_transfers (sender_id, idem);
 create index if not exists money_transfers_sender_idx on money_transfers (sender_id, id desc);
 create index if not exists money_transfers_recipient_idx on money_transfers (recipient_id, id desc);

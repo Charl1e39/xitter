@@ -7,6 +7,7 @@ import { hateIn } from "./hate";
 import { hasBlockedPhrase } from "./settings";
 import { settings } from "./settings";
 import { BADGE_TYPES, sniffImage } from "./media";
+import { economy } from "./money";
 
 export class ShopError extends Error {}
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -33,7 +34,7 @@ export async function buyShopItem(userId: string, itemId: string, text: string, 
 	if (text.length > 500 || (text && (hateIn(text) || hasBlockedPhrase(text)))) throw new ShopError("That announcement text can't be used.");
 	if (link && (!/^https?:\/\/[^\s]+$/i.test(link) || link.length > 500)) throw new ShopError("Use a full http or https link, up to 500 characters.");
 	return sql.begin(async (tx) => {
-		await tx`insert into money_wallets (user_id, balance_cents) values (${userId}::bigint, ${settings().money.starting_cents}) on conflict (user_id) do nothing`;
+		await tx`insert into money_wallets (user_id, balance_cents) values (${userId}::bigint, ${economy().starting_cents}) on conflict (user_id) do nothing`;
 		const [item] = await tx`select id::text, name, description, price_cents::bigint as price, kind, badge_id::text
 			from money_shop_items where id = ${itemId}::bigint and active and status = 'approved' for update`;
 		if (!item) throw new ShopError("That shop item isn't available.");

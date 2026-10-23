@@ -31,6 +31,7 @@ import {
 	closeRequest,
 	disclaimerAccepted,
 	disclaimerText,
+	economy,
 	paymentUrl,
 	payments,
 	requestMoney,
@@ -365,7 +366,7 @@ const MONEY_ROUTES: Route[] = [
 		method: "GET", pattern: /^\/money$/, scope: "read",
 		run: async (v) => {
 			await moneyOn(v, { accepted: false });
-			const m = settings().money;
+			const m = economy();
 			return { data: { name: `${settings().instance_name} Equicoins`, balance_cents: await balanceOf(v.id), disclaimer_accepted: await disclaimerAccepted(v.id), disclaimer: disclaimerText(), max_transfer_cents: m.max_transfer_cents, like_cents: m.like_cents, note_max: NOTE_MAX } };
 		},
 	},
