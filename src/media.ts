@@ -659,8 +659,10 @@ async function serveConversationVideo(id: string, viewer: Viewer): Promise<Respo
 // a file the browser may keep is tagged by its size and time, which change
 // when the file is replaced
 function tagOf(served: Served, body: Blob, cache: string): { etag?: string } {
-	if (cache !== REVALIDATE) return {};
-	const time = (body as Blob & { lastModified?: number }).lastModified ?? 0;
+	// a remote file kept only in memory has no time, so a same-size swap would
+	// keep its tag; those go untagged and are always sent whole
+	const time = (body as Blob & { lastModified?: number }).lastModified;
+	if (cache !== REVALIDATE || !time) return {};
 	return { etag: `"${served.id}-${body.size.toString(36)}-${time.toString(36)}"` };
 }
 const unchanged = (req: Request, headers: Record<string, string>) => !!headers.etag && req.headers.get("if-none-match") === headers.etag;
@@ -691,7 +693,10 @@ export async function serveMedia(req: Request, pathname: string, viewer: Viewer)
 	if (unchanged(req, headers)) return new Response(null, { status: 304, headers });
 	const size = body.size;
 	const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
-	if (range && (range[1] || range[2])) {
+	// If-Range: a part of a file that changed since would be stitched onto the
+	// old one, so anything but the current tag gets the whole file
+	const ifRange = req.headers.get("if-range");
+	if (range && (range[1] || range[2]) && (ifRange === null || ifRange === headers.etag)) {
 		// "bytes=-N" means the last N bytes
 		const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
 		const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
@@ -701,6 +706,9 @@ export async function serveMedia(req: Request, pathname: string, viewer: Viewer)
 			headers: { ...headers, "content-range": `bytes ${start}-${end}/${size}`, "content-length": String(end - start + 1) },
 		});
 	}
+	// Bun answers a Range itself when the body comes from a file, even as a
+	// stream and whatever If-Range says; piped, it goes out whole
+	if (range && ifRange !== null) return new Response(body.stream().pipeThrough(new TransformStream()), { headers: { ...headers, "content-length": String(size) } });
 	return new Response(body, { headers });
 }
 
