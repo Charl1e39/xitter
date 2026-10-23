@@ -132,9 +132,10 @@ export async function sendMoney(senderId: string, handle: string, amountCents: n
 }
 
 // The payments feed (Admin > Money): a local account that posts every
-// payment, once it has gone through, as "@alice sent $5 to @liza! #Money"
-// over its card (the link closing the text is the card's). The card leaves
-// the note out: that stays between the two sides.
+// payment, once it has gone through, as "Alice sent $5 to Liza! #Money"
+// over its card (the link closing the text is the card's): names, not
+// handles, so nobody is mentioned. The card leaves the note out: that stays
+// between the two sides.
 export async function feedAccount(): Promise<{ id: string; screen_name: string } | null> {
 	const handle = settings().money.feed;
 	return handle ? await accountFor(handle) : null;
@@ -147,7 +148,9 @@ async function announcePayment(id: string) {
 		const t = (await payments([id])).get(id);
 		if (!t) return;
 		const { createPost } = await import("./posts");
-		await createPost(feed.id, `@${t.sender.screen_name} sent ${shortCents(t.amount)} to @${t.recipient.screen_name}! #Money ${paymentUrl(id)}`, { skipPreview: true });
+		// a name that would read as a mention or a link keeps the @ and dots out of it
+		const name = (p: Party) => (p.merchant?.name ?? p.name).replace(/[@＠]/g, "").replace(/\./g, "\u2024").trim() || p.screen_name;
+		await createPost(feed.id, `${name(t.sender)} sent ${shortCents(t.amount)} to ${name(t.recipient)}! #Money ${paymentUrl(id)}`, { skipPreview: true });
 	} catch (e) {
 		console.error("money feed:", e instanceof Error ? e.message : e);
 	}

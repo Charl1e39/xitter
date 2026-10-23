@@ -174,11 +174,11 @@ try {
 	const fedId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;
 	await Bun.sleep(500);
 	const [fed] = await sql`select id::text, text from posts where user_id = ${feedId}::bigint`;
-	check("each payment is posted by the feed account", fed?.text === `@${a} sent $2 to @${b}! #Money http://localhost:${process.env.PORT ?? 3000}/i/xmoney/p/${fedId}`, fed?.text);
+	check("each payment is posted by the feed account, with names", fed?.text === `Money A sent $2 to Money B! #Money http://localhost:${process.env.PORT ?? 3000}/i/xmoney/p/${fedId}`, fed?.text);
 	const fedPost = (await sb.get("TweetDetail", { focalTweetId: fed.id })) as any;
 	const fedJson = JSON.stringify(fedPost);
-	check("its post reads as the payment over the card", fedJson.includes(`"display_text_range":[0,${`@${a} sent $2 to @${b}! #Money`.length}]`) && fedJson.includes('"name":"summary"'));
-	check("and tells both sides they were mentioned", JSON.stringify(await sb.get("NotificationsTimeline", { timeline_type: "Mentions", count: 40 })).includes(`#Money`));
+	check("its post reads as the payment over the card", fedJson.includes(`"display_text_range":[0,${"Money A sent $2 to Money B! #Money".length}]`) && fedJson.includes('"name":"summary"'));
+	check("and mentions nobody", !JSON.stringify(await sb.get("NotificationsTimeline", { timeline_type: "Mentions", count: 40 })).includes("#Money") && !(await sql`select 1 from post_mentions where post_id = ${fed.id}::bigint`).length);
 	const fedCard = (await sc.json(`money/cards?ids=p${fedId}&by=${feedName}`))[`p${fedId}`] as string;
 	check("anyone sees its card", typeof fedCard === "string");
 	check("naming both sides", fedCard?.includes("Money A") && fedCard?.includes("Money B") && fedCard?.includes("sent to"));
