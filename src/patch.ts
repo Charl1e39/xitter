@@ -18,6 +18,9 @@ const API_HOSTS = ["api", "upload", "caps", "jf"].flatMap((s) => [`${s}.x.com`, 
 const inRegex = (url: string) => url.replace(/[/.]/g, (c) => "\\" + c);
 
 const RULES: [RegExp, string][] = [
+	// The Settings search index is built from X's route list: add our custom GIF
+	// provider page so searching "gif" can open it from the results.
+	[/\blet (\w+)=\(0,[\w$]+\.[\w$]+\)\(\),(\w+)=\[\];(?=for\(let \w+ of \1\)for\(let \w+ of\(\2\.push\()/g, '$&$1.find(group=>group.path==="/settings/account")?.items.push({id:"xitterGifProvider",path:"/settings/xitter/gifs",title:"GIF provider",synonyms:["gif","provider","klipy","tenor","giphy"],isSearchable:true,items:[]});'],
 	[/(restID:\w+\.rest_id,tweetCreateRequest:)(\w+)(,userMentions:\w+\}\))/g, '$1($2?.xitter_conversation_card&&!$2.status?{...$2,status:window.__XITTER_CONVERSATION_DRAFT_LABEL__?.($2.xitter_conversation_card)||"Conversation card"}:$2)$3'],
 	[/(\w+)=(\w+)\.status\|\|"",(\w+)="Failed"===/g, '$1=$2.status||($2.xitter_conversation_card&&window.__XITTER_CONVERSATION_DRAFT_LABEL__?.($2.xitter_conversation_card))||"",$3="Failed"==='],
 	[/(_handleClick=(\w+)=>\(\)=>\{)(let \w+=\2\.scheduling_info&&\2\.scheduling_info\.execute_at;if\(!this\.isDraftsTab)/g, '$1document.dispatchEvent(new CustomEvent("xitter:restore-conversation-cards",{detail:$2.tweet_create_request}));$3'],
