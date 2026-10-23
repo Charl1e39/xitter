@@ -135,15 +135,16 @@ export function tidyData(links: MenuLink[] = []) {
 	const s = settings();
 	const menuItems = ["Embed post"];
 	if (!feature("lists")) menuItems.push("Add/remove from Lists");
+	const announcement = s.money_shop.enabled && s.money_shop.announcement?.text ? s.money_shop.announcement : s.announcement;
 	return {
 		menuItems,
 		premium: feature("premium"),
 		imageGen: feature("image_gen"),
-		announcement: s.announcement.text
+		announcement: announcement.text
 			? {
-				id: s.announcement.id,
-				text: s.announcement.text,
-				buttons: s.announcement.buttons?.length ? s.announcement.buttons : s.announcement.link ? [{ label: "More", url: s.announcement.link }] : [],
+				id: announcement.id,
+				text: announcement.text,
+				buttons: announcement.buttons?.length ? announcement.buttons : "link" in announcement && announcement.link ? [{ label: "More", url: announcement.link }] : [],
 			}
 			: null,
 		instance: s.instance_name,

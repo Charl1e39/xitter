@@ -1637,6 +1637,34 @@ create table if not exists money_like_rewards (
 	primary key (post_id, liker_id)
 );
 create index if not exists money_like_rewards_author_idx on money_like_rewards (author_id, created_at desc);
+-- X Money shop: listings can award an existing custom badge or submit an
+-- instance announcement for staff approval. Orders hold the price until reviewed.
+create table if not exists money_shop_items (
+	id bigint primary key,
+	name text not null check (char_length(name) between 1 and 60),
+	description text not null default '' check (char_length(description) <= 240),
+	price_cents bigint not null check (price_cents > 0),
+	kind text not null check (kind in ('badge', 'announcement')),
+	badge_id bigint references custom_badges(id) on delete set null,
+	active boolean not null default true,
+	created_at timestamptz not null default now(),
+	check ((kind = 'badge' and badge_id is not null) or kind = 'announcement')
+);
+create table if not exists money_shop_orders (
+	id bigint primary key,
+	user_id bigint not null references users(id) on delete cascade,
+	item_id bigint references money_shop_items(id) on delete set null,
+	item_name text not null,
+	price_cents bigint not null check (price_cents > 0),
+	kind text not null check (kind in ('badge', 'announcement')),
+	payload jsonb not null default '{}'::jsonb,
+	status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+	created_at timestamptz not null default now(),
+	reviewed_at timestamptz,
+	reviewed_by bigint references users(id) on delete set null
+);
+create index if not exists money_shop_orders_pending_idx on money_shop_orders (created_at) where status = 'pending';
+create index if not exists money_shop_orders_user_idx on money_shop_orders (user_id, id desc);
 -- when the account accepted X Money's disclaimer (money-page.ts), shown the first time Money opens
 alter table money_wallets add column if not exists disclaimer_at timestamptz;
 -- a payment staff reversed (Admin > Money): the money went back to its sender

@@ -38,6 +38,7 @@ import {
 import { hit } from "./ratelimit";
 import { feature, settings } from "./settings";
 import { MONEY_ICON } from "./tidy";
+import { buyShopItem, myShopOrders, shopItems, shopView, ShopError } from "./money-shop";
 
 const CSS = `
 main{padding:0;gap:0}
@@ -123,6 +124,17 @@ dt{color:var(--muted)}
 dd{margin:0;text-align:right;overflow-wrap:anywhere;display:flex;justify-content:flex-end;align-items:center;gap:4px}
 .settings{padding:16px;display:grid;gap:16px}
 .settings h2{margin:8px 0 0}
+.shop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:8px 0 16px;border-bottom:1px solid var(--border)}
+.shop-head h1{margin-bottom:4px}
+.shop-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}
+.shop-item{display:grid;align-content:start;gap:14px;padding:16px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}
+.shop-item h2{margin:0 0 4px;font-size:18px}
+.shop-price{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+.shop-form{display:grid;gap:8px;justify-items:stretch}
+.shop-form label{margin:0;color:var(--muted);font-size:13px}
+.shop-form textarea{min-height:88px}
+.orders{display:grid;gap:8px}
+.order{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
 .preview{display:grid;gap:12px}
 .xm-badge{width:18px;height:18px;flex:none}
 .xm-card{margin:0;--xm-bg:var(--bg);--xm-fg:var(--text)}
@@ -271,7 +283,7 @@ async function home(req: Request, viewer: Viewer, status = 200, notice = "", err
 		viewer,
 		"Money",
 		`<section class="hero" aria-label="Balance">${tile}<div class="label">Balance</div><div class="amount">${formatCents(balance)}</div>
-${viewer.actor ? `<p class="dim">Only @${esc(viewer.screen_name)} can send money from this account.</p>` : `<div class="actions"><a class="pill primary" href="/account/money/send">Send</a><a class="pill" href="/account/money/request">Request</a></div>`}
+${viewer.actor ? `<p class="dim">Only @${esc(viewer.screen_name)} can send money from this account.</p>` : `<div class="actions"><a class="pill primary" href="/account/money/send">Send</a><a class="pill" href="/account/money/request">Request</a>${settings().money_shop.enabled ? `<a class="pill" href="/account/money/shop">Shop</a>` : ""}</div>`}
 ${likes > 0 ? `<p class="dim" style="margin-top:12px">You earn ${likes < 100 ? `${likes}¢` : formatCents(likes)} for each like on your posts.</p>` : ""}</section>
 ${notice ? `<div class="notice" role="status">${notice}</div>` : ""}${error ? `<div class="notice error" role="alert">${esc(error)}</div>` : ""}
 ${asks.length ? `<section aria-label="Requests"><div class="month">Requests</div>${asks.join("\n")}</section>` : ""}
@@ -545,6 +557,26 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 			if (e instanceof MoneyError) return requestView(req, viewer, 400, values, e.message);
 			throw e;
 		}
+	}
+	if (p === "/account/money/shop") {
+		if (!settings().money_shop.enabled) return page(req, viewer, "Money shop", `<p class="empty">The shop is closed.</p>`, 404);
+		let error = "";
+		if (req.method === "POST") {
+			if (viewer.actor) error = `Only @${esc(viewer.screen_name)} can buy from this account.`;
+			else if (!hit("write", viewer.id).ok) error = "You're sending requests too fast. Wait a few minutes and try again.";
+			else {
+				const form = await req.formData();
+				try {
+					await buyShopItem(viewer.id, String(form.get("item") ?? ""), String(form.get("text") ?? ""), String(form.get("link") ?? ""));
+					return new Response(null, { status: 303, headers: { location: "/account/money/shop?requested=1" } });
+				} catch (e) {
+					if (e instanceof ShopError) error = e.message;
+					else throw e;
+				}
+			}
+		}
+		const [items, orders, balance] = await Promise.all([shopItems(), myShopOrders(viewer.id), balanceOf(viewer.id)]);
+		return page(req, viewer, "Money shop", await shopView(items, orders, balance, error, url.searchParams.has("requested") ? "Your request is waiting for staff approval." : ""));
 	}
 	if (p === "/account/money/people") return peopleApi(viewer, url.searchParams.get("q") ?? "");
 	const sending = p === "/account/money/send";

@@ -669,6 +669,7 @@ const RENDER = {
 	async money(main, q = "") {
 		const m = await api("money", { q });
 		const admin = can("saveMoney");
+		const staff = can("moderator");
 		const usd = (c) => "$" + (c / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 		const dollars = (c) => String(c / 100);
 		const cards = (list) => '<div class="cards">' + list.map(([k, v]) => '<div class="card"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("") + "</div>";
@@ -690,6 +691,13 @@ const RENDER = {
 			(admin ? '<button class="btn" id="madj">Apply</button>' : "") + "</div>" +
 			'<div class="box"><h2>Biggest balances</h2>' + (m.top.length ? '<div class="list">' + m.top.map((u, i) => '<p class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="dim small">' + (i + 1) + '.</span> <a target="_blank" href="/' + esc(u.screen_name) + '">' + esc(u.name || u.screen_name) + "</a> " + badge(u) + ' <span class="dim small">@' + esc(u.screen_name) + "</span></span><b>" + usd(u.balance) + "</b></p>").join("") + "</div>" : '<p class="dim small">No wallets yet.</p>') + "</div>" +
 			"</div>" +
+			'<section style="margin-top:20px"><h2>Shop</h2><p class="dim">Sell custom badges and announcement slots for X Money. Purchases are charged while pending. Staff approval delivers the item; rejecting a request refunds it.</p>' +
+			'<div class="box" style="margin-top:12px"><label class="row"><input type="checkbox" id="shopOn"' + (m.shop.enabled ? " checked" : "") + (admin ? "" : " disabled") + '> X Money shop is open</label>' +
+			(admin ? '<div class="field" style="margin-top:12px"><label>New item name</label><input id="shopName" maxlength="60" placeholder="Community badge"></div><div class="field"><label>Description</label><input id="shopDesc" maxlength="240" placeholder="A badge for your profile"></div>' +
+			'<div class="field"><label>Price ($)</label><input id="shopPrice" inputmode="decimal" placeholder="5"></div><div class="field"><label>What it gives</label><select id="shopKind"><option value="badge">Custom badge</option><option value="announcement">Custom announcement</option></select></div>' +
+			'<div class="field" id="shopBadgeField"><label>Badge</label><select id="shopBadge"><option value="">Choose a badge</option>' + m.shop.badges.map((b) => '<option value="' + esc(b.id) + '">' + esc(b.name) + "</option>").join("") + '</select></div><button class="btn primary" id="shopCreate">Add shop item</button>' : "") + "</div>" +
+			'<div class="grid2" style="margin-top:12px"><div class="box"><h2>Items</h2>' + (m.shop.items.length ? '<div class="list">' + m.shop.items.map((i) => '<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><span><b>' + esc(i.name) + '</b><span class="dim small"> · ' + usd(i.price) + ' · ' + esc(i.kind === "badge" ? i.badge_name : "announcement") + (i.active ? "" : " · hidden") + '</span></span>' + (admin ? '<button class="btn" data-shop-active="' + esc(i.id) + '" data-active="' + i.active + '">' + (i.active ? "Hide" : "Show") + "</button>" : "") + "</div>").join("") + "</div>" : '<p class="dim small">No items yet. Make custom badges on the Badges page, then list them here.</p>') + '</div><div class="box"><h2>Waiting for approval (' + m.shop.pending.length + ')</h2>' + (m.shop.pending.length ? '<div class="list">' + m.shop.pending.map((o) => '<div class="box" style="margin:8px 0"><div class="row" style="justify-content:space-between"><b>' + esc(o.item_name) + '</b><span>' + usd(o.price) + '</span></div><p class="dim small">@' + esc(o.screen_name) + ' · ' + esc(o.kind) + ' · ' + esc(when(o.created_at)) + '</p>' + (o.kind === "announcement" ? '<p style="white-space:pre-wrap;margin-top:8px">' + esc(o.payload?.text || "") + (o.payload?.link ? '<br><a target="_blank" href="' + esc(o.payload.link) + '">' + esc(o.payload.link) + '</a>' : "") + '</p>' : "") +
+				(staff ? '<div class="row" style="margin-top:8px"><button class="btn primary" data-shop-review="' + esc(o.id) + '" data-approve="1">Approve</button><button class="btn danger" data-shop-review="' + esc(o.id) + '" data-approve="0">Reject and refund</button></div>' : "") + "</div>").join("") + "</div>" : '<p class="dim small">Nothing waiting for review.</p>') + "</div></div></section>" +
 			'<h2>Payments</h2><div class="row" style="margin-bottom:12px"><input id="mq" placeholder="Payments to or from @username" value="' + esc(q) + '" style="flex:1;min-width:200px"><button class="btn" id="mqs">Search</button></div>' +
 			'<div class="scroll">' + (m.recent.length
 				? '<table class="table"><tr><th>When</th><th>From</th><th>To</th><th>Amount</th>' + (m.notes ? "<th>Note</th>" : "") + "<th></th></tr>" +
@@ -697,6 +705,15 @@ const RENDER = {
 						(r.reversed_at ? '<span class="pill suspended">reversed</span>' : admin ? '<button class="btn danger" data-rev="' + esc(r.id) + '">Reverse</button>' : "") + "</td></tr>").join("") + "</table>"
 				: '<div class="empty">No payments' + (q ? " for @" + esc(q) : "") + ".</div>") + "</div>";
 		const again = () => this.money(main, $("#mq").value);
+		if ($("#shopOn")) $("#shopOn").onchange = () => act(() => api("saveShop", { enabled: $("#shopOn").checked }), "Shop setting saved").then(again);
+		if ($("#shopKind")) $("#shopKind").onchange = () => { $("#shopBadgeField").hidden = $("#shopKind").value !== "badge"; };
+		if ($("#shopCreate")) $("#shopCreate").onclick = () => act(() => api("createShopItem", { name: $("#shopName").value, description: $("#shopDesc").value, price: $("#shopPrice").value, kind: $("#shopKind").value, badgeId: $("#shopBadge").value }), "Shop item created").then(again);
+		main.querySelectorAll("[data-shop-active]").forEach((b) => b.onclick = () => act(() => api("setShopItem", { id: b.dataset.shopActive, active: b.dataset.active !== "true" }), "Shop item updated").then(again));
+		main.querySelectorAll("[data-shop-review]").forEach((b) => b.onclick = async () => {
+			const approve = b.dataset.approve === "1";
+			if (!(await ask((approve ? "Approve" : "Reject and refund") + " this shop request?"))) return;
+			act(() => api("reviewShopOrder", { id: b.dataset.shopReview, approve }), approve ? "Shop request approved" : "Request rejected and refunded").then(again);
+		});
 		if ($("#msave")) $("#msave").onclick = () => act(() => api("saveMoney", { starting: $("#ms").value, max_transfer: $("#mx").value, like: $("#ml").value }), "Money settings saved").then(again);
 		if ($("#madj")) $("#madj").onclick = () => act(async () => { const r = await api("adjustMoney", { handle: $("#mah").value, amount: $("#maa").value }); notice("@" + r.to + " now has " + usd(r.balance)); }).then(again);
 		$("#mqs").onclick = again;

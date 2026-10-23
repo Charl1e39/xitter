@@ -7,6 +7,7 @@ import { sql } from "./db";
 import { MoneyError, adjust, formatCents, parseAmount } from "./money";
 import { feature, setSetting, settings } from "./settings";
 import { allows } from "./staff-permissions";
+import { shopItems } from "./money-shop";
 
 // dollars typed in the panel ("100", "0.50") as cents, within limits
 function cents(v: unknown, what: string, min: number, max: number) {
@@ -38,10 +39,22 @@ export const moneyActions: Record<string, Action> = {
 				from money_transfers t join users s on s.id = t.sender_id join users r on r.id = t.recipient_id
 				${q ? sql`where lower(s.screen_name) = lower(${q}) or lower(r.screen_name) = lower(${q})` : sql``}
 				order by t.id desc limit 50`;
+			const [badges, items, pendingOrders] = await Promise.all([
+				sql`select id::text, name from custom_badges order by name`,
+				shopItems(),
+				sql`select o.id::text, o.item_name, o.price_cents::bigint as price, o.kind, o.payload, o.created_at, u.id::text as user_id, u.screen_name
+					from money_shop_orders o join users u on u.id = o.user_id where o.status = 'pending' order by o.created_at`,
+			]);
 			const n = (v: unknown) => Number(v);
 			return {
 				enabled: feature("money"),
 				settings: settings().money,
+				shop: {
+					...settings().money_shop,
+					items: items.map((i: any) => ({ ...i, price: Number(i.price), active: !!i.active })),
+					badges,
+					pending: pendingOrders.map((o: any) => ({ ...o, price: Number(o.price) })),
+				},
 				totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, n(v)])),
 				top: top.map((r: any) => ({ ...r, balance: n(r.balance) })),
 				// what people wrote on their payments is theirs: only staff who may put payments right see it
@@ -75,6 +88,82 @@ export const moneyActions: Record<string, Action> = {
 				if (e instanceof MoneyError) throw new AdminError(e.message);
 				throw e;
 			}
+		},
+	},
+	saveShop: {
+		role: "admin",
+		run: async (a, b) => {
+			const next = { ...settings().money_shop, enabled: b.enabled === true };
+			await setSetting("money_shop", next);
+			await audit(a, "money_shop_settings", null, { enabled: next.enabled });
+			return { shop: next };
+		},
+	},
+	createShopItem: {
+		role: "admin",
+		run: async (a, b) => {
+			const name = String(b.name ?? "").trim();
+			const description = String(b.description ?? "").trim();
+			if (!name || [...name].length > 60) throw new AdminError("Item names are 1 to 60 characters.");
+			if ([...description].length > 240) throw new AdminError("Descriptions are up to 240 characters.");
+			const price = cents(b.price, "The item price", 1, 1_000_000_000);
+			const kind = b.kind === "announcement" ? "announcement" : b.kind === "badge" ? "badge" : null;
+			if (!kind) throw new AdminError("Choose a badge or announcement item.");
+			let badgeId: string | null = null;
+			if (kind === "badge") {
+				badgeId = idOf(b.badgeId, "badge");
+				if (!(await sql`select 1 from custom_badges where id = ${badgeId}::bigint`).length) throw new AdminError("Choose an existing custom badge.");
+			}
+			const id = newId();
+			await sql`insert into money_shop_items (id, name, description, price_cents, kind, badge_id)
+				values (${id}::bigint, ${name}, ${description}, ${price}, ${kind}, ${badgeId}::bigint)`;
+			await audit(a, "money_shop_item_create", id, { name, price, kind, badgeId });
+			return { id };
+		},
+	},
+	setShopItem: {
+		role: "admin",
+		run: async (a, b) => {
+			const id = idOf(b.id);
+			const rows = await sql`update money_shop_items set active = ${b.active === true} where id = ${id}::bigint returning name, active`;
+			if (!rows.length) throw new AdminError("No such shop item.", 404);
+			await audit(a, "money_shop_item_update", id, { active: rows[0].active });
+			return {};
+		},
+	},
+	reviewShopOrder: {
+		role: "moderator",
+		run: async (a, b) => {
+			const id = idOf(b.id, "order");
+			const approve = b.approve === true;
+			const result = await sql.begin(async (tx) => {
+				const [order] = await tx`select id::text, user_id::text, item_name, price_cents::bigint as price, kind, payload, status
+					from money_shop_orders where id = ${id}::bigint for update`;
+				if (!order) throw new AdminError("No such shop request.", 404);
+				if (order.status !== "pending") throw new AdminError("That shop request has already been reviewed.");
+				if (approve && order.kind === "badge") {
+					const badgeId = idOf(order.payload?.badgeId, "badge");
+					if (!(await tx`select 1 from custom_badges where id = ${badgeId}::bigint`).length) throw new AdminError("That badge was removed; reject this request to refund it.");
+					const [exists] = await tx`select 1 from user_badges where user_id = ${order.user_id}::bigint and badge_id = ${badgeId}::bigint`;
+					if (!exists) {
+						const [position] = await tx`select coalesce(max(position), -1) + 1 as n from user_badges where user_id = ${order.user_id}::bigint`;
+						await tx`insert into user_badges (user_id, badge_id, position) values (${order.user_id}::bigint, ${badgeId}::bigint, ${Number(position.n)}) on conflict do nothing`;
+					}
+				}
+				if (!approve) {
+					await tx`insert into money_wallets (user_id, balance_cents) values (${order.user_id}::bigint, 0) on conflict do nothing`;
+					await tx`update money_wallets set balance_cents = balance_cents + ${Number(order.price)} where user_id = ${order.user_id}::bigint`;
+				}
+				await tx`update money_shop_orders set status = ${approve ? "approved" : "rejected"}, reviewed_at = now(), reviewed_by = ${a.id}::bigint where id = ${id}::bigint`;
+				return order;
+			});
+			if (approve && result.kind === "announcement") {
+				const text = String(result.payload?.text ?? "").trim();
+				const link = String(result.payload?.link ?? "");
+				await setSetting("money_shop", { ...settings().money_shop, announcement: { id, text, buttons: link ? [{ label: "Learn more", url: link }] : [] } });
+			}
+			await audit(a, approve ? "money_shop_approve" : "money_shop_reject", id, { user: result.user_id, item: result.item_name, refund: !approve });
+			return {};
 		},
 	},
 	// the money goes back from the recipient to the sender, if they still have it
