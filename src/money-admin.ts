@@ -5,7 +5,7 @@
 import { AdminError, type Action, audit, idOf } from "./admin";
 import { sql } from "./db";
 import { newId } from "./ids";
-import { MoneyError, accountFor, adjust, formatCents, parseAmount, unannouncePayment } from "./money";
+import { MoneyError, accountFor, adjust, formatCents, networkEconomy, parseAmount, unannouncePayment } from "./money";
 import { feature, setSetting, settings } from "./settings";
 import { allows } from "./staff-permissions";
 import { shopItems } from "./money-shop";
@@ -54,9 +54,12 @@ export const moneyActions: Record<string, Action> = {
 					from money_remote_shop_items where source_active and status = 'approved' order by updated_at desc limit 500`,
 			]);
 			const n = (v: unknown) => Number(v);
+			const { ECONOMY_HOME, isEconomyHome, networkTotals } = await import("./money-federation");
 			return {
 				enabled: feature("money"),
 				settings: settings().money,
+				economy: { home: ECONOMY_HOME, is_home: isEconomyHome(), network: networkEconomy() },
+				network_totals: await networkTotals(),
 				shop: {
 					...settings().money_shop,
 					items: items.map((i: any) => ({ ...i, price: Number(i.price), active: !!i.active })),
@@ -86,6 +89,10 @@ export const moneyActions: Record<string, Action> = {
 				max_transfer_cents: cents(b.max_transfer, "The most one payment moves", 1, 10_000_000_000),
 				like_cents: cents(b.like, "The like reward", 0, 100_000),
 				feed: feed?.screen_name ?? "",
+				follow_network: b.follow_network === true,
+				peer_daily_cents: cents(String(b.peer_daily ?? "").trim() || "0", "The daily limit from one instance", 0, 10_000_000_000),
+				move_balance: b.move_balance !== false,
+				network_totals: b.network_totals === true,
 			};
 			await setSetting("money", next);
 			await audit(a, "money_settings", null, next);

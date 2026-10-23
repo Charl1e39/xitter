@@ -994,12 +994,19 @@ const RENDER = {
 		main.innerHTML = "<h1>Equicoins</h1>" +
 			'<p class="dim">Equicoins, the instance\'s own play money: accounts send it to each other, ask for it and earn it from likes. It has no cash value. ' +
 			(m.enabled ? "It's on; Settings › Features turns it off." : '<b>It\'s off</b>: Settings › Features turns it on.') + "</p>" +
+			(m.network_totals ? '<h2 style="margin-top:16px">Across the network</h2>' + cards([["In circulation", usd(m.network_totals.circulation)], ["Wallets", m.network_totals.wallets], ["Payments", m.network_totals.payments], ["Instances sharing", m.network_totals.instances]]) + '<h2 style="margin-top:16px">This instance</h2>' : "") +
 			cards([["In circulation", usd(t.circulation)], ["Wallets", t.wallets], ["Payments", t.payments], ["Moved", usd(t.volume)], ["Payments this week", t.payments_week], ["Moved this week", usd(t.volume_week)], ["Paid for likes", usd(t.likes_paid)], ["Open requests", t.open_requests], ["Merchants", t.merchants]]) +
 			'<div class="grid2" style="margin-top:16px">' +
 			'<div class="box"><h2>Settings</h2>' +
 			'<div class="field"><label>Starting balance of a new wallet ($)</label><input id="ms" inputmode="decimal" value="' + esc(dollars(m.settings.starting_cents)) + '"' + (admin ? "" : " disabled") + "></div>" +
 			'<div class="field"><label>Most one payment or request moves ($)</label><input id="mx" inputmode="decimal" value="' + esc(dollars(m.settings.max_transfer_cents)) + '"' + (admin ? "" : " disabled") + "></div>" +
 			'<div class="field"><label>Paid to a post\'s author for each like ($, 0 for none)</label><input id="ml" inputmode="decimal" value="' + esc(dollars(m.settings.like_cents)) + '"' + (admin ? "" : " disabled") + "></div>" +
+			(m.economy.is_home ? '<p class="dim small">This instance is ' + esc(m.economy.home) + ': instances that follow the network use these three.</p>' :
+				'<label class="row"><input type="checkbox" id="mnet"' + (m.settings.follow_network ? " checked" : "") + (admin ? "" : " disabled") + '> Use the network\'s starting balance, like reward and largest payment, from ' + esc(m.economy.home) + '</label>' +
+				(m.settings.follow_network ? '<p class="dim small">' + (m.economy.network ? "In force now: " + usd(m.economy.network.starting_cents) + " to start, " + usd(m.economy.network.like_cents) + " a like, up to " + usd(m.economy.network.max_transfer_cents) + " a payment. The values above apply only while " + esc(m.economy.home) + " can\'t be reached." : "Not heard from " + esc(m.economy.home) + " yet: the values above apply until it answers.") + "</p>" : "")) +
+			'<div class="field"><label>Most taken in from one instance a day, its payments and likes ($, 0 for no limit)</label><input id="mcap" inputmode="decimal" value="' + esc(dollars(m.settings.peer_daily_cents)) + '"' + (admin ? "" : " disabled") + "></div>" +
+			'<label class="row"><input type="checkbox" id="mmove"' + (m.settings.move_balance ? " checked" : "") + (admin ? "" : " disabled") + '> An account moving to another instance takes its balance along</label>' +
+			'<label class="row"><input type="checkbox" id="mtot"' + (m.settings.network_totals ? " checked" : "") + (admin ? "" : " disabled") + '> Share this instance\'s totals with other instances and show the network\'s</label>' +
 			'<div class="field"><label>Post every payment from (@account, empty for none)</label><input id="mf" placeholder="@economy" value="' + esc(m.settings.feed ? "@" + m.settings.feed : "") + '"' + (admin ? "" : " disabled") + "></div>" +
 			'<p class="dim small">A new starting balance applies to wallets made from now on. Likes pay once per post and account. The payments feed posts each payment\'s card, without its note, from that account; reversing a payment takes its post down. People are told on the Send screen.</p>' +
 			(admin ? '<button class="btn primary" id="msave">Save</button>' : "") + "</div>" +
@@ -1054,7 +1061,7 @@ const RENDER = {
 			if (!(await ask((approve ? "Approve" : "Reject and refund") + " this shop request?"))) return;
 			act(() => api("reviewShopOrder", { id: b.dataset.shopReview, approve }), approve ? "Shop request approved" : "Request rejected and refunded").then(again);
 		});
-		if ($("#msave")) $("#msave").onclick = () => act(() => api("saveMoney", { starting: $("#ms").value, max_transfer: $("#mx").value, like: $("#ml").value, feed: $("#mf").value }), "Equicoins settings saved").then(again);
+		if ($("#msave")) $("#msave").onclick = () => act(() => api("saveMoney", { starting: $("#ms").value, max_transfer: $("#mx").value, like: $("#ml").value, feed: $("#mf").value, follow_network: !!$("#mnet")?.checked, peer_daily: $("#mcap").value, move_balance: $("#mmove").checked, network_totals: $("#mtot").checked }), "Equicoins settings saved").then(again);
 		if ($("#madj")) $("#madj").onclick = () => act(async () => { const r = await api("adjustMoney", { handle: $("#mah").value, amount: $("#maa").value }); notice("@" + r.to + " now has " + usd(r.balance)); }).then(again);
 		$("#mqs").onclick = again;
 		$("#mq").onkeydown = (e) => { if (e.key === "Enter") again(); };
