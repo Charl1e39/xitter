@@ -3,7 +3,8 @@ export function patchCountryAudience(text: string): string {
 	out = out.replace(/"co"===([\w$]+)(?=&&null!=[\w$]+&&[\w$]+\.length>0|\?"all")/g, '["co","country"].includes($1)');
 	out = out.replace(/"co"===([\w$]+)&&null==([\w$]+)/g, '["co","country"].includes($1)&&null==$2');
 	out = out.replace(/conversationControlRegionCodes:([\w$]+)\.includes\("co"\)\?([\w$]+):void 0/g, 'conversationControlRegionCodes:($1.includes("co")||$1.includes("country"))?$2:void 0');
-	return out.replace(/function [\w$]+\(\{defersChangesUntilApply:[\s\S]{0,160}?\}\)\{[\s\S]*?(?=let [\w$]+=[\w$]+\.A\.create)/g, (menu) => {
+	if (!out.includes("defersChangesUntilApply:") || !out.includes('.restrictions.includes("co")')) return out;
+	return out.replace(/function [\w$]+\(\{defersChangesUntilApply:[\s\S]{0,160}?\}\)\{[\s\S]{0,16000}?(?=let [\w$]+=[\w$]+\.A\.create)/g, (menu) => {
 		const navigator = /options:([\w$]+)\.options/.exec(menu)?.[1];
 		let patched = menu;
 		if (!navigator) return menu;

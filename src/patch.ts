@@ -150,7 +150,8 @@ export function patchText(text: string, chat = false): string {
 	let re: RegExp, to: string;
 	for ([re, to] of chat ? [...CHAT_RULES, ...RULES] : RULES) out = out.replace(re, to);
 	out = patchCountryAudience(out);
-	return out.replace(/function [\w$]+\(\{onApply:[\w$]+,onBack:[\w$]+,options:([\w$]+),value:[\w$]+\}\)\{let\[[\w$]+,[\w$]+\]=([\w$]+)\.useState\([\s\S]*?(?=let [\w$]+=[\w$]+\.A\.create)/g, (picker, options, react) => {
+	if (!out.includes("ConversationControlsQuery")) return out;
+	return out.replace(/function [\w$]+\(\{onApply:[\w$]+,onBack:[\w$]+,options:([\w$]+),value:[\w$]+\}\)\{let\[[\w$]+,[\w$]+\]=([\w$]+)\.useState\([\s\S]{0,16000}?(?=let [\w$]+=[\w$]+\.A\.create)/g, (picker, options, react) => {
 		const jsx = /\(0,([\w$]+)\.jsxs\)/.exec(picker)?.[1];
 		if (!jsx) return picker;
 		return picker.replace(/\{let\[/, `{let[xitterCountrySearch,xitterSetCountrySearch]=${react}.useState(""),[`).replace('children:[', `children:[(0,${jsx}.jsx)("input",{type:"search","aria-label":"Search countries or regions",placeholder:"Search countries or regions",value:xitterCountrySearch,onChange:e=>xitterSetCountrySearch(e.target.value),style:{boxSizing:"border-box",width:"100%",padding:12,marginBottom:12,border:"1px solid currentColor",borderRadius:8,background:"transparent",color:"inherit",font:"inherit"}}),`).replace(`children:${options}.map`, `children:${options}.filter(e=>e.label.toLocaleLowerCase().includes(xitterCountrySearch.toLocaleLowerCase())||e.value.toLocaleLowerCase().includes(xitterCountrySearch.toLocaleLowerCase())).map`);

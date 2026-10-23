@@ -2,7 +2,7 @@
 // (status, media_ids, reply target, ...); it is kept as sent and replayed when
 // the time comes.
 
-import { replyControl } from "./reply-controls";
+import { replyControl, replyCountrySelections } from "./reply-controls";
 import { conversationCard } from "./conversation-cards";
 import { checkConversationCard } from "./conversation-card-moderation";
 import type { Viewer } from "./auth";
@@ -36,11 +36,11 @@ function cleanPart(value: unknown, draft = false): Vars {
 		media_ids: ids(r.media_ids).slice(0, 4),
 		exclude_reply_user_ids: ids(r.exclude_reply_user_ids).slice(0, 50),
 	};
-	let key: string;
+	const selections = replyCountrySelections(r.conversation_control_region_codes);
+	const control = replyControl(r.conversation_control, selections);
 	if (r.conversation_control !== undefined) {
-		replyControl(r.conversation_control, r.conversation_control_region_codes);
-		out.conversation_control = r.conversation_control;
-		out.conversation_control_region_codes = r.conversation_control_region_codes ?? [];
+		out.conversation_control = control.policy ? r.conversation_control : "all";
+		out.conversation_control_region_codes = control.selections;
 	}
 	if (r.xitter_conversation_card !== undefined) {
 		try { out.xitter_conversation_card = conversationCard(r.xitter_conversation_card, () => false, draft); }
@@ -51,8 +51,8 @@ function cleanPart(value: unknown, draft = false): Vars {
 		throw new PostError("A post can have up to four valid attachments.", 186);
 	if (isId(r.in_reply_to_status_id)) out.in_reply_to_status_id = r.in_reply_to_status_id;
 	if (typeof r.attachment_url === "string" && r.attachment_url.length <= 300) out.attachment_url = r.attachment_url;
-	for (key of ["auto_populate_reply_metadata", "possibly_sensitive"]) if (typeof r[key] === "boolean") out[key] = r[key];
-	for (key of ["media_options", "richtext_options", "cashtag_attachment_options", "content_disclosure_options"])
+	for (const key of ["auto_populate_reply_metadata", "possibly_sensitive"]) if (typeof r[key] === "boolean") out[key] = r[key];
+	for (const key of ["media_options", "richtext_options", "cashtag_attachment_options", "content_disclosure_options"])
 		if (r[key] && typeof r[key] === "object") out[key] = r[key];
 	return out;
 }

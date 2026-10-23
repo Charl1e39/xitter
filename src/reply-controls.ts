@@ -11,16 +11,24 @@ const COUNTRIES = allCountries();
 const REGIONS = new Map([...new Set(COUNTRIES.map((country) => regionName(country.code)).filter((region): region is string => !!region))].sort().map((region) => [region, [region.toLowerCase(), ...COUNTRIES.filter((country) => regionName(country.code) === region).flatMap((country) => [country.code.toLowerCase(), country.name.toLowerCase()])]]));
 
 const MODES: Record<string, string> = { all: "All", community: "Community", by_invitation: "ByInvitation", verified: "Verified", premium: "Premium", my_network: "MyNetwork", followers: "Followers", co: "CountryOfOrigin", country: "Country", Co: "CountryOfOrigin" };
+const POLICIES = new Set(["All", "Community", "ByInvitation", "Verified", "Premium", "MyNetwork", "Followers", "CountryOfOrigin", "Country"]);
+
+export function replyCountrySelections(value: unknown = []): string[] {
+	if (!Array.isArray(value) || value.length > 1000 || value.some((selection) => typeof selection !== "string" || !selection.trim() || selection.length > 100)) throw new ReplyControlError("Choose valid countries or regions.");
+	return [...new Set(value.map((selection: string) => selection.trim()))];
+}
 
 export function replyControl(mode: unknown, selected: unknown = []): ReplyControl {
-	const policy = typeof mode === "string" ? MODES[mode] ?? mode : "All";
+	const policy = typeof mode === "string" ? (Object.hasOwn(MODES, mode) ? MODES[mode] : mode) : "All";
 	let selections: string[] = [], values: string[] = [], selection: string, code: string | undefined;
-	if (mode !== undefined && typeof mode !== "string") throw new ReplyControlError("Unknown reply audience.");
+	if (mode !== undefined && (typeof mode !== "string" || !POLICIES.has(policy))) {
+		console.warn("Unknown reply audience; using Everyone:", typeof mode === "string" ? JSON.stringify(mode.slice(0, 120)) : typeof mode);
+		return { policy: null, selections, values };
+	}
 	if (policy === "All") return { policy: null, selections, values };
-	if (!["Community", "ByInvitation", "Verified", "Premium", "MyNetwork", "Followers", "CountryOfOrigin", "Country"].includes(policy)) throw new ReplyControlError("Unknown reply audience.");
 	if (policy === "CountryOfOrigin" || policy === "Country") {
-		if (!Array.isArray(selected) || !selected.length || selected.length > 1000 || selected.some((value) => typeof value !== "string" || !value.trim() || value.length > 100)) throw new ReplyControlError("Choose at least one valid country or region.");
-		selections = [...new Set(selected.map((value: string) => value.trim()))];
+		selections = replyCountrySelections(selected);
+		if (!selections.length) throw new ReplyControlError("Choose at least one valid country or region.");
 		for (selection of selections) {
 			if (policy === "CountryOfOrigin" && REGIONS.has(selection)) {
 				values.push(...REGIONS.get(selection)!);

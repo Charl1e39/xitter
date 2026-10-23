@@ -1,9 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { Glob } from "bun";
 import { allCountries, countryCode } from "../src/countries";
 import { patchText } from "../src/patch";
-import { replyControl, ReplyControlError } from "../src/reply-controls";
+import { replyControl, replyCountrySelections, ReplyControlError } from "../src/reply-controls";
 
 test("country choices include all ISO countries and territories plus Kosovo", () => {
 	const countries = allCountries();
@@ -25,12 +25,29 @@ test("reply audiences normalize native composer modes and preserve custom countr
 	expect(replyControl("CountryOfOrigin", ["Antarctica"]).values).toContain("aq");
 });
 
-test("malformed audiences cannot silently become unrestricted posts", () => {
+test("unknown audiences fall back to Everyone and log a bounded diagnostic", () => {
+	const warn = spyOn(console, "warn").mockImplementation(() => {});
+	let mode: unknown;
+	try {
+		for (mode of ["FutureClientMode", 123, null, {}, "constructor", "__proto__", "a".repeat(2000)]) expect(replyControl(mode)).toEqual({ policy: null, selections: [], values: [] });
+		expect(warn).toHaveBeenCalledTimes(7);
+		expect(String(warn.mock.calls.at(-1)?.[1]).length).toBeLessThan(130);
+	} finally {
+		warn.mockRestore();
+	}
+});
+
+test("malformed geographic audiences cannot silently become unrestricted posts", () => {
 	let selection: unknown;
-	expect(() => replyControl("unknown")).toThrow(ReplyControlError);
-	expect(() => replyControl(123)).toThrow(ReplyControlError);
 	for (selection of [[], null, "SE", [123], [""], ["a".repeat(101)], Array(1001).fill("SE")]) expect(() => replyControl("Country", selection)).toThrow(ReplyControlError);
 	expect(() => replyControl("co", ["Mars"])).toThrow(ReplyControlError);
+});
+
+test("country list validation also works without a geographic audience", () => {
+	let selection: unknown;
+	expect(replyCountrySelections()).toEqual([]);
+	expect(replyCountrySelections([" Mars ", "SE", "Mars"])).toEqual(["Mars", "SE"]);
+	for (selection of [null, "SE", [123], [""], ["a".repeat(101)], Array(1001).fill("SE")]) expect(() => replyCountrySelections(selection)).toThrow(ReplyControlError);
 });
 
 test("country serialization survives creation, mutation and normalization", () => {

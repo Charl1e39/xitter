@@ -473,26 +473,24 @@ export async function createPost(userId: string, input: string, opts: { replyToI
 	const db = opts.db ?? sql;
 	const text = cleanText(input, { blankLines: 2 });
 	const control = replyControl(opts.replyPolicy, opts.replySelections);
-	const id = newId();
-	const caps = settings().daily_caps;
-	const reply = !!opts.replyToId;
-	const cap = reply ? caps.replies : caps.posts;
-	const link = opts.quoteId || opts.articleId ? undefined : linksIn(text).filter((l) => previewable(l.url)).at(-1);
-	let author: any, parent: any, unseenRoot: any, quoted: any, owner: any, m: any, made: any;
-	let conversationId = id;
-	let replyToUserId: string | null = null;
-	[author] = await db`select status, deactivated_at, role from users where id = ${userId}::bigint`;
+	const [author] = await db`select status, deactivated_at, role from users where id = ${userId}::bigint`;
 	if (!author || author.status === "restricted" || author.status === "suspended" || author.deactivated_at) throw new PostError("Your account can't post right now.", 326);
+	const caps = settings().daily_caps;
 	if (caps.enabled && !author.role) {
-		[made] = await db`select count(*)::int as n from posts
+		const reply = !!opts.replyToId;
+		const cap = reply ? caps.replies : caps.posts;
+		const [made] = await db`select count(*)::int as n from posts
 			where user_id = ${userId}::bigint and id >= ${idAt(Date.now() - 86_400_000)}::bigint and (reply_to_id is not null) = ${reply}`;
 		if (made.n >= cap) throw new PostError(`You've reached the limit of ${cap} ${reply ? (cap === 1 ? "reply" : "replies") : cap === 1 ? "post" : "posts"} a day. Try again later.`, 185);
 	}
 	await checkLength(userId, text, db);
 	await refuseHate(userId, text);
 	if (hasBlockedPhrase(text)) throw new PostError("Your post contains a phrase this instance doesn't allow.", 186);
+	const id = newId();
+	let conversationId = id;
+	let replyToUserId: string | null = null;
 	if (opts.replyToId) {
-		[parent] = await db`select p.conversation_id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.replyToId}::bigint and ${seenBy(userId)}`;
+		const [parent] = await db`select p.conversation_id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.replyToId}::bigint and ${seenBy(userId)}`;
 		if (!parent) throw new PostError("The post you are replying to no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(parent.user_id), db)) throw new PostError("You can't reply to this post.", 433);
 		conversationId = parent.conversation_id;
@@ -500,20 +498,20 @@ export async function createPost(userId: string, input: string, opts: { replyToI
 		// a public reply inside a protected thread still belongs to that thread
 		// (GHSA-m9x2-9x93-6879): its root must be one the author may see too; a
 		// deleted root leaves the thread open
-		[unseenRoot] = await db`select 1 from posts p join users u on u.id = p.user_id
+		const [unseenRoot] = await db`select 1 from posts p join users u on u.id = p.user_id
 			where p.id = ${conversationId}::bigint and not ${seenBy(userId)}`;
 		if (unseenRoot) throw new PostError("The post you are replying to no longer exists.", 385);
 		if (await replyLimited(String(conversationId), userId, db)) throw new PostError("The author of the original post limited who can reply to it.", 433);
 	}
 	if (opts.quoteId) {
-		[quoted] = await db`select p.id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.quoteId}::bigint and ${seenBy(userId)}`;
+		const [quoted] = await db`select p.id, p.user_id from posts p join users u on u.id = p.user_id where p.id = ${opts.quoteId}::bigint and ${seenBy(userId)}`;
 		if (!quoted) throw new PostError("The post you are quoting no longer exists.", 385);
 		if (await isBlockedEitherWay(userId, String(quoted.user_id), db)) throw new PostError("You can't quote this post.", 433);
-		[owner] = await db`select protected from users where id = ${quoted.user_id}::bigint`;
+		const [owner] = await db`select protected from users where id = ${quoted.user_id}::bigint`;
 		if (owner?.protected && String(quoted.user_id) !== userId) throw new PostError("Posts from protected accounts can't be quoted.", 433);
 	}
 	if (opts.communityId) {
-		[m] = await db`select 1 from community_members where community_id = ${opts.communityId}::bigint and user_id = ${userId}::bigint`;
+		const [m] = await db`select 1 from community_members where community_id = ${opts.communityId}::bigint and user_id = ${userId}::bigint`;
 		if (!m) throw new PostError("Only members can post in this community.", 187);
 	}
 	await db`insert into posts (id, user_id, text, reply_to_id, reply_to_user_id, conversation_id, quote_id, article_id, source, community_id, place_id, reply_policy, reply_selections, reply_allowed_values)
@@ -521,6 +519,7 @@ export async function createPost(userId: string, input: string, opts: { replyToI
 	// Transactional callers resolve unknown remote handles before publication;
 	// only database writes belong inside the transaction and its row locks.
 	await saveMentions(id, text, undefined, opts.db ? undefined : lookupRemoteUser, db);
+	const link = opts.quoteId || opts.articleId ? undefined : linksIn(text).filter((l) => previewable(l.url)).at(-1);
 	if (!opts.skipPreview && link && !(await db`select 1 from link_previews where url = ${link.url}`).length) await Promise.race([fetchPreview(link.url), Bun.sleep(4000)]);
 	return id;
 }

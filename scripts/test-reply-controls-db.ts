@@ -12,7 +12,7 @@ const accounts = Array.from({ length: 6 }, () => newId());
 const [author, followed, network, outsider, overridden, custom] = accounts;
 const customCountry = `Étoile 星 ${author}`;
 const viewer = { id: author } as any;
-let scheduled: string, id: string, nested: string, result: any, choices: any[], row: any, policy: string;
+let scheduled: string, id: string, nested: string, result: any, choices: any[], row: any, policy: string, mode: unknown, selection: unknown;
 
 assert(["localhost", "127.0.0.1"].includes(database.hostname) && /test|codex/.test(database.pathname), "Use a disposable local test database.");
 
@@ -75,6 +75,24 @@ try {
 	await expectReply(outsider, id, true);
 	result = await (await runOperation("CreateTweet", viewer, { tweet_text: "invalid", conversation_control: { mode: "Country", allowed_country_codes: [] } })).json();
 	assert(result.errors?.length);
+	for (mode of ["FutureClientMode", 123]) {
+		result = await callOperation("CreateTweet", viewer, { tweet_text: "unknown client audience", conversation_control: { mode } });
+		id = result.data.create_tweet.tweet_results.result.rest_id;
+		[row] = await sql`select reply_policy from posts where id = ${id}::bigint`;
+		assert.equal(row.reply_policy, null);
+		await expectReply(outsider, id, true);
+	}
+	for (mode of [undefined, "all", "Community", "FutureClientMode"]) {
+		for (selection of [null, "SE", [123], [""], ["a".repeat(101)], Array(1001).fill("SE")]) {
+			result = await (await runOperation("CreateDraftTweet", viewer, { post_tweet_request: { status: "invalid draft country list", conversation_control: mode, conversation_control_region_codes: selection } })).json();
+			assert.equal(result.errors?.[0]?.code, 214, JSON.stringify(result));
+		}
+	}
+	assert.equal((await sql`select id from scheduled_posts where user_id = ${author}::bigint and request->>'status' = 'invalid draft country list'`).length, 0);
+	result = await scheduledHandlers.CreateDraftTweet(viewer, { post_tweet_request: { status: "future client draft", conversation_control: "FutureClientMode", conversation_control_region_codes: ["Mars"] } });
+	[row] = await sql`select request from scheduled_posts where id = ${result.data.tweet.rest_id}::bigint`;
+	assert.equal(row.request.conversation_control, "all");
+	assert.deepEqual(row.request.conversation_control_region_codes, []);
 	for (policy of ["Community", "Verified", "MyNetwork", "ByInvitation", "Country", "CountryOfOrigin"]) {
 		id = await createPost(author, `Mention @reply_${outsider}`, { replyPolicy: policy, replySelections: policy === "Country" ? [customCountry] : policy === "CountryOfOrigin" ? ["Europe"] : [], skipPreview: true });
 		await expectReply(outsider, id, true);
