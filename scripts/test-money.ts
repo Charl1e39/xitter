@@ -105,6 +105,11 @@ try {
 	check("the composer lists the payment", recent[0]?.id === payId && recent[0].url.endsWith(`/i/xmoney/p/${payId}`), recent[0]);
 	const made = await sa.gql("CreateTweet", { tweet_text: `Fast & Free Payments ${recent[0].url}` });
 	const post = made.data.create_tweet.tweet_results.result;
+	check("the post's text stops before the card's link", JSON.stringify(post.legacy?.display_text_range) === JSON.stringify([0, "Fast & Free Payments".length]), post.legacy?.display_text_range);
+	const spaced = (await sa.gql("CreateTweet", { tweet_text: `Here you go\n\n${recent[0].url}\n` })).data.create_tweet.tweet_results.result;
+	check("and before the blank lines over it", spaced.legacy?.display_text_range?.[1] === "Here you go".length, spaced.legacy?.display_text_range);
+	const middle = (await sa.gql("CreateTweet", { tweet_text: `look ${recent[0].url} wow` })).data.create_tweet.tweet_results.result;
+	check("a link with text after it stays in the text", middle.legacy?.display_text_range?.[1] === [...middle.legacy.full_text].length);
 	check("a post with the payment's link gets its card", post.card?.legacy?.name === "summary" && JSON.stringify(post.card).includes(`$12.50 sent to Money B`), post.card?.legacy?.binding_values?.[0]);
 	check("a stranger now sees the card", typeof (await sc.json(`money/cards?ids=p${payId}&by=${a}`))[`p${payId}`] === "string");
 	const html = (await sb.json(`money/cards?ids=p${payId}&by=${a}`))[`p${payId}`] as string;
