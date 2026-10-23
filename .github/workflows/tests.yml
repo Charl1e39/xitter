@@ -61,6 +61,7 @@ jobs:
           bun scripts/test-two-factor-credentials.ts
           bun scripts/test-poll-visibility.ts
           bun scripts/test-list-visibility-races.ts
+          bun scripts/test-reply-controls-db.ts
           bun scripts/test-search-operators.ts
           bun scripts/test-note-appeals.ts
           bun scripts/test-search-indexing.ts
