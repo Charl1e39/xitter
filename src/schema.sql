@@ -1671,7 +1671,7 @@ create table if not exists money_shop_items (
 	name text not null check (char_length(name) between 1 and 60),
 	description text not null default '' check (char_length(description) <= 240),
 	price_cents bigint not null check (price_cents > 0),
-	kind text not null check (kind in ('badge', 'custom_badge', 'announcement')),
+	kind text not null check (kind in ('badge', 'custom_badge', 'announcement', 'checkmark', 'invite', 'hashflag', 'sticker_pack', 'explore_card', 'boost')),
 	badge_id bigint references custom_badges(id) on delete set null,
 	active boolean not null default true,
 	status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
@@ -1679,7 +1679,7 @@ create table if not exists money_shop_items (
 	approved_by bigint references users(id) on delete set null,
 	approved_at timestamptz,
 	created_at timestamptz not null default now(),
-	check ((kind = 'badge' and badge_id is not null) or kind in ('custom_badge', 'announcement'))
+	check ((kind = 'badge' and badge_id is not null) or kind <> 'badge')
 );
 alter table money_shop_items add column if not exists status text not null default 'pending';
 alter table money_shop_items add column if not exists created_by bigint references users(id) on delete set null;
@@ -1690,9 +1690,9 @@ alter table money_shop_items add constraint money_shop_items_status_check check 
 -- Existing listings must be reviewed under the new policy before anyone can buy them.
 update money_shop_items set active = false where status = 'pending';
 alter table money_shop_items drop constraint if exists money_shop_items_kind_check;
-alter table money_shop_items add constraint money_shop_items_kind_check check (kind in ('badge', 'custom_badge', 'announcement'));
+alter table money_shop_items add constraint money_shop_items_kind_check check (kind in ('badge', 'custom_badge', 'announcement', 'checkmark', 'invite', 'hashflag', 'sticker_pack', 'explore_card', 'boost'));
 alter table money_shop_items drop constraint if exists money_shop_items_check;
-alter table money_shop_items add constraint money_shop_items_check check ((kind = 'badge' and badge_id is not null) or kind in ('custom_badge', 'announcement'));
+alter table money_shop_items add constraint money_shop_items_check check ((kind = 'badge' and badge_id is not null) or kind <> 'badge');
 -- Federated listings are cached for review on every receiving instance. They
 -- stay hidden until a local moderator approves them, and source changes reset
 -- that approval so edited listings are reviewed again.
@@ -1702,7 +1702,7 @@ create table if not exists money_remote_shop_items (
 	name text not null,
 	description text not null default '',
 	price_cents bigint not null check (price_cents > 0),
-	kind text not null check (kind in ('badge', 'custom_badge', 'announcement')),
+	kind text not null check (kind in ('badge', 'custom_badge', 'announcement', 'checkmark', 'invite', 'hashflag', 'sticker_pack', 'explore_card', 'boost')),
 	badge_name text,
 	badge_image bytea,
 	badge_mime text,
@@ -1722,7 +1722,7 @@ create table if not exists money_shop_orders (
 	item_id bigint references money_shop_items(id) on delete set null,
 	item_name text not null,
 	price_cents bigint not null check (price_cents > 0),
-	kind text not null check (kind in ('badge', 'custom_badge', 'announcement')),
+	kind text not null check (kind in ('badge', 'custom_badge', 'announcement', 'checkmark', 'invite', 'hashflag', 'sticker_pack', 'explore_card', 'boost')),
 	payload jsonb not null default '{}'::jsonb,
 	status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
 	created_at timestamptz not null default now(),
@@ -1730,9 +1730,41 @@ create table if not exists money_shop_orders (
 	reviewed_by bigint references users(id) on delete set null
 );
 alter table money_shop_orders drop constraint if exists money_shop_orders_kind_check;
-alter table money_shop_orders add constraint money_shop_orders_kind_check check (kind in ('badge', 'custom_badge', 'announcement'));
+alter table money_shop_orders add constraint money_shop_orders_kind_check check (kind in ('badge', 'custom_badge', 'announcement', 'checkmark', 'invite', 'hashflag', 'sticker_pack', 'explore_card', 'boost'));
 create index if not exists money_shop_orders_pending_idx on money_shop_orders (created_at) where status = 'pending';
 create index if not exists money_shop_orders_user_idx on money_shop_orders (user_id, id desc);
+alter table money_remote_shop_items drop constraint if exists money_remote_shop_items_kind_check;
+alter table money_remote_shop_items add constraint money_remote_shop_items_kind_check check (kind in ('badge', 'custom_badge', 'announcement', 'checkmark', 'invite', 'hashflag', 'sticker_pack', 'explore_card', 'boost'));
+-- a checkmark, hashflag, Explore card or boost lasts this many days
+alter table money_shop_items add column if not exists days integer check (days between 1 and 365);
+alter table money_remote_shop_items add column if not exists days integer;
+alter table money_shop_orders add column if not exists days integer;
+-- a gift: delivered to this account instead of the buyer
+alter table money_shop_orders add column if not exists recipient_id bigint references users(id) on delete cascade;
+create index if not exists money_shop_orders_gift_idx on money_shop_orders (recipient_id, reviewed_at desc) where recipient_id is not null;
+-- pictures sent with a request (a sticker pack, a hashflag's emoji, an Explore
+-- card's picture), kept until staff review it
+create table if not exists money_shop_order_files (
+	order_id bigint not null references money_shop_orders(id) on delete cascade,
+	position integer not null,
+	name text not null default '',
+	image bytea not null,
+	mime text not null,
+	primary key (order_id, position)
+);
+-- a blue checkmark bought in the shop comes off when this passes (money-shop.ts);
+-- one staff give has none
+alter table users add column if not exists shop_verified_until timestamptz;
+-- boosted posts: For you shows one, marked as an ad, on each page until ends_at
+create table if not exists post_boosts (
+	id bigint primary key,
+	post_id bigint not null references posts(id) on delete cascade,
+	user_id bigint not null references users(id) on delete cascade,
+	order_id bigint references money_shop_orders(id) on delete set null,
+	created_at timestamptz not null default now(),
+	ends_at timestamptz not null
+);
+create index if not exists post_boosts_ends_idx on post_boosts (ends_at);
 -- when the account accepted Equicoins' disclaimer (money-page.ts), shown the first time Equicoins opens
 alter table money_wallets add column if not exists disclaimer_at timestamptz;
 -- a payment staff reversed (Admin > Money): the money went back to its sender

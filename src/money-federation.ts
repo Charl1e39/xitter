@@ -22,7 +22,7 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 		if (!feature("money") || !settings().money_shop.enabled) return signedAnswer(incoming, 200, { items: [], next: null });
 		const after = new URLSearchParams(query).get("after") ?? "";
 		if (after && !/^\d{1,19}$/.test(after)) return signedAnswer(incoming, 400, { error: "Invalid catalog cursor." });
-		const items = await sql`select i.id::text, i.name, i.description, i.price_cents::bigint as price, i.kind,
+		const items = await sql`select i.id::text, i.name, i.description, i.price_cents::bigint as price, i.kind, i.days,
 			b.name as badge_name, b.image as badge_image, b.mime as badge_mime
 			from money_shop_items i left join custom_badges b on b.id = i.badge_id
 			where i.status = 'approved' and i.active and (i.kind <> 'badge' or b.id is not null)
@@ -35,7 +35,7 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 				const image = Buffer.from(i.badge_image);
 				badge = { name: i.badge_name, mime: i.badge_mime, image: image.toString("base64") };
 			}
-			shared.push({ id: i.id, name: i.name, description: i.description, price: Number(i.price), kind: i.kind, badge });
+			shared.push({ id: i.id, name: i.name, description: i.description, price: Number(i.price), kind: i.kind, days: i.days, badge });
 		}
 		return signedAnswer(incoming, 200, { items: shared, next: items.length === 8 ? items[items.length - 1].id : null });
 	}
@@ -155,6 +155,7 @@ async function syncTotals() {
 }
 
 async function syncRemoteShop(instance: string) {
+	const { SHOP_KINDS } = await import("./money-shop");
 	const catalogItems: any[] = [];
 	let after = "";
 	for (let page = 0; page < 100; page++) {
@@ -173,7 +174,7 @@ async function syncRemoteShop(instance: string) {
 	for (const raw of catalogItems) {
 		if (!/^\d{1,19}$/.test(String(raw?.id ?? "")) || typeof raw.name !== "string" || !raw.name.trim() || [...raw.name].length > 60 ||
 			typeof raw.description !== "string" || [...raw.description].length > 240 || !Number.isSafeInteger(raw.price) || raw.price <= 0 || raw.price > 1_000_000_000 ||
-			!["badge", "custom_badge", "announcement"].includes(raw.kind)) continue;
+			!SHOP_KINDS.includes(raw.kind)) continue;
 		let badge: { name: string; mime: string; image: Buffer } | undefined;
 		if (raw.kind === "badge") {
 			const item = raw.badge;
@@ -184,34 +185,35 @@ async function syncRemoteShop(instance: string) {
 			if (image.length > 256 * 1024 || !info || info.mime !== item.mime || info.width > 1024 || info.height > 1024) continue;
 			badge = { name: item.name.trim(), mime: item.mime, image };
 		}
-		valid.push({ id: String(raw.id), name: raw.name.trim(), description: raw.description, price: raw.price, kind: raw.kind, badge });
+		const days = Number.isSafeInteger(raw.days) && raw.days >= 1 && raw.days <= 365 ? raw.days : null;
+		valid.push({ id: String(raw.id), name: raw.name.trim(), description: raw.description, price: raw.price, kind: raw.kind, days, badge });
 	}
 	await sql.begin(async (tx) => {
 		const ids = valid.map((i) => i.id);
 		await tx`update money_remote_shop_items set source_active = false, updated_at = now() where origin = ${instance}`;
 		for (const item of valid) {
 			const badge = item.badge;
-			await tx`insert into money_remote_shop_items (origin, remote_id, name, description, price_cents, kind, badge_name, badge_image, badge_mime, source_active)
-				values (${instance}, ${item.id}::bigint, ${item.name}, ${item.description}, ${item.price}, ${item.kind}, ${badge?.name ?? null}, ${badge?.image ?? null}, ${badge?.mime ?? null}, true)
+			await tx`insert into money_remote_shop_items (origin, remote_id, name, description, price_cents, kind, days, badge_name, badge_image, badge_mime, source_active)
+				values (${instance}, ${item.id}::bigint, ${item.name}, ${item.description}, ${item.price}, ${item.kind}, ${item.days}, ${badge?.name ?? null}, ${badge?.image ?? null}, ${badge?.mime ?? null}, true)
 				on conflict (origin, remote_id) do update set
 					status = case when (money_remote_shop_items.name, money_remote_shop_items.description, money_remote_shop_items.price_cents, money_remote_shop_items.kind,
-						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime)
-						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime)
+						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime, money_remote_shop_items.days)
+						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime, excluded.days)
 						then 'pending' else money_remote_shop_items.status end,
 					active = case when (money_remote_shop_items.name, money_remote_shop_items.description, money_remote_shop_items.price_cents, money_remote_shop_items.kind,
-						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime)
-						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime)
+						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime, money_remote_shop_items.days)
+						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime, excluded.days)
 						then false else money_remote_shop_items.active end,
 					reviewed_by = case when (money_remote_shop_items.name, money_remote_shop_items.description, money_remote_shop_items.price_cents, money_remote_shop_items.kind,
-						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime)
-						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime)
+						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime, money_remote_shop_items.days)
+						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime, excluded.days)
 						then null else money_remote_shop_items.reviewed_by end,
 					reviewed_at = case when (money_remote_shop_items.name, money_remote_shop_items.description, money_remote_shop_items.price_cents, money_remote_shop_items.kind,
-						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime)
-						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime)
+						money_remote_shop_items.badge_name, money_remote_shop_items.badge_image, money_remote_shop_items.badge_mime, money_remote_shop_items.days)
+						is distinct from (excluded.name, excluded.description, excluded.price_cents, excluded.kind, excluded.badge_name, excluded.badge_image, excluded.badge_mime, excluded.days)
 						then null else money_remote_shop_items.reviewed_at end,
 					name = excluded.name, description = excluded.description, price_cents = excluded.price_cents, kind = excluded.kind,
-					badge_name = excluded.badge_name, badge_image = excluded.badge_image, badge_mime = excluded.badge_mime,
+					days = excluded.days, badge_name = excluded.badge_name, badge_image = excluded.badge_image, badge_mime = excluded.badge_mime,
 					source_active = true, updated_at = now()`;
 		}
 		if (ids.length) await tx`update money_remote_shop_items set source_active = false where origin = ${instance} and not (remote_id = any(${sql.array(ids, "INT8")}))`;

@@ -171,7 +171,7 @@ const SCRIPT = `document.addEventListener("click",function(e){
 	var g=e.target.closest("[data-xm-go]");
 	if(g){e.preventDefault();var to=g.getAttribute("data-xm-go");if(to.indexOf("/account/")===0)location.href=to;else try{parent.__xitterGo(to)}catch(x){top.location.href=to}}
 });
-document.querySelectorAll(".shop-file-input").forEach(function(input){input.addEventListener("change",function(){var name=input.nextElementSibling&&input.nextElementSibling.querySelector("[data-file-name]");if(name)name.textContent=input.files&&input.files[0]?input.files[0].name:"No image chosen"})});
+document.querySelectorAll(".shop-file-input").forEach(function(input){input.addEventListener("change",function(){var name=input.nextElementSibling&&input.nextElementSibling.querySelector("[data-file-name]");var n=input.files?input.files.length:0;if(name)name.textContent=n>1?n+" images":n?input.files[0].name:"No image chosen"})});
 document.querySelectorAll(".pick").forEach(function(p){p.addEventListener("click",function(){var to=document.getElementById("to");to.value="@"+p.dataset.handle;document.querySelectorAll(".pick").forEach(function(q){q.setAttribute("aria-pressed",q===p?"true":"false")});document.getElementById("amount").focus()})});
 var amt=document.getElementById("amount");if(amt){var fit=function(){amt.style.width=Math.max(1,amt.value.length)*0.62+0.4+"em"};amt.addEventListener("input",fit);fit();if(!amt.value)amt.focus()}
 var auto=document.querySelector("[data-compose][data-auto]");if(auto)auto.click();
@@ -562,6 +562,14 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 		if (!image?.badge_image || !BADGE_TYPES.includes(image.badge_mime)) return new Response("Not found", { status: 404 });
 		return new Response(image.badge_image, { headers: { "content-type": image.badge_mime, "cache-control": "private, max-age=300", "x-content-type-options": "nosniff" } });
 	}
+	// a picture sent with a shop request, for the staff who review it (Admin > Equicoins)
+	const orderFile = /^\/account\/money\/shop\/file\/(\d{1,19})\/(\d{1,2})$/.exec(p);
+	if (req.method === "GET" && orderFile) {
+		if (viewer.role !== "admin" && viewer.role !== "moderator") return new Response("Not found", { status: 404 });
+		const [f] = await sql`select image, mime from money_shop_order_files where order_id = ${orderFile[1]}::bigint and position = ${Number(orderFile[2])}`;
+		if (!f) return new Response("Not found", { status: 404 });
+		return new Response(f.image, { headers: { "content-type": f.mime, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
+	}
 	if (!(await disclaimerAccepted(viewer.id))) {
 		if (req.method !== "POST") return disclaimer(req, viewer, p + url.search);
 		const form = await req.formData();
@@ -606,11 +614,31 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 			else if (!hit("write", viewer.id).ok) error = "You're sending requests too fast. Wait a few minutes and try again.";
 			else {
 				const form = await req.formData();
+				const text = (k: string) => String(form.get(k) ?? "");
+				const image = async (f: FormDataEntryValue | null) => (f instanceof File && f.size ? Buffer.from(await f.arrayBuffer()) : undefined);
 				try {
-					const uploaded = form.get("badgeImage");
-					const badgeImage = uploaded instanceof File && uploaded.size ? Buffer.from(await uploaded.arrayBuffer()) : undefined;
-					await buyShopItem(viewer.id, String(form.get("item") ?? ""), String(form.get("text") ?? ""), String(form.get("link") ?? ""), String(form.get("badgeName") ?? ""), badgeImage);
-					return new Response(null, { status: 303, headers: { location: "/account/money/shop?requested=1" } });
+					const stickers: Buffer[] = [];
+					for (const f of form.getAll("stickers").slice(0, 7)) {
+						const b = await image(f);
+						if (b) stickers.push(b);
+					}
+					const bought = await buyShopItem(viewer.id, text("item"), {
+						text: text("text"),
+						link: text("link"),
+						badgeName: text("badgeName"),
+						badgeImage: await image(form.get("badgeImage")),
+						gift: text("gift"),
+						hashtag: text("hashtag"),
+						emoji: await image(form.get("emoji")),
+						packName: text("packName"),
+						stickers,
+						title: text("title"),
+						summary: text("summary"),
+						query: text("query"),
+						picture: await image(form.get("picture")),
+						post: text("post"),
+					});
+					return new Response(null, { status: 303, headers: { location: `/account/money/shop?${bought.auto ? "ready" : "requested"}=1` } });
 				} catch (e) {
 					if (e instanceof ShopError) error = e.message;
 					else throw e;
@@ -618,7 +646,8 @@ export async function moneyRoute(req: Request, viewer: Viewer): Promise<Response
 			}
 		}
 		const [items, orders, balance] = await Promise.all([shopItems(true), myShopOrders(viewer.id), balanceOf(viewer.id)]);
-		return page(req, viewer, "Equicoins shop", await shopView(items, orders, balance, error, url.searchParams.has("requested") ? "Your request is waiting for staff approval." : ""));
+		const notice = url.searchParams.has("ready") ? "It's ready: find it under Your requests." : url.searchParams.has("requested") ? "Your request is waiting for staff approval." : "";
+		return page(req, viewer, "Equicoins shop", await shopView(items, orders, balance, error, notice));
 	}
 	if (p === "/account/money/people") return peopleApi(viewer, url.searchParams.get("q") ?? "", url.searchParams.has("local"));
 	const sending = p === "/account/money/send";
