@@ -1,13 +1,23 @@
-// Admin > Money (admin.html): X Money's settings, how much money there is and
+// Admin > Equicoins (admin.html): settings, how much money there is and
 // where it went, and the tools to put it right: adjusting a balance and
 // reversing a payment. Every change is in the audit log.
 
 import { AdminError, type Action, audit, idOf } from "./admin";
 import { sql } from "./db";
+import { newId } from "./ids";
 import { MoneyError, adjust, formatCents, parseAmount } from "./money";
 import { feature, setSetting, settings } from "./settings";
 import { allows } from "./staff-permissions";
 import { shopItems } from "./money-shop";
+import { BADGE_TYPES, sniffImage } from "./media";
+
+// Another active local admin or moderator who could review a listing this
+// account made. Without one, a lone admin approves their own listings.
+async function otherReviewer(userId: string, tx: typeof sql = sql) {
+	const [r] = await tx`select 1 from users where id <> ${userId}::bigint and instance is null and role in ('admin', 'moderator')
+		and status <> 'suspended' and deactivated_at is null limit 1`;
+	return !!r;
+}
 
 // dollars typed in the panel ("100", "0.50") as cents, within limits
 function cents(v: unknown, what: string, min: number, max: number) {
@@ -39,11 +49,18 @@ export const moneyActions: Record<string, Action> = {
 				from money_transfers t join users s on s.id = t.sender_id join users r on r.id = t.recipient_id
 				${q ? sql`where lower(s.screen_name) = lower(${q}) or lower(r.screen_name) = lower(${q})` : sql``}
 				order by t.id desc limit 50`;
-			const [badges, items, pendingOrders] = await Promise.all([
+			const [badges, items, pendingOrders, remotePending, [remotePendingCount], remoteItems, selfReview] = await Promise.all([
 				sql`select id::text, name from custom_badges order by name`,
 				shopItems(),
 				sql`select o.id::text, o.item_name, o.price_cents::bigint as price, o.kind, o.payload, o.created_at, u.id::text as user_id, u.screen_name
 					from money_shop_orders o join users u on u.id = o.user_id where o.status = 'pending' order by o.created_at`,
+				sql`select origin, remote_id::text as id, name, description, price_cents::bigint as price, kind, badge_name,
+					case when badge_image is not null then encode(badge_image, 'base64') end as badge_data, badge_mime
+					from money_remote_shop_items where source_active and status = 'pending' order by updated_at desc limit 4`,
+				sql`select count(*)::int as n from money_remote_shop_items where source_active and status = 'pending'`,
+				sql`select origin, remote_id::text as id, name, price_cents::bigint as price, kind, badge_name, active
+					from money_remote_shop_items where source_active and status = 'approved' order by updated_at desc limit 500`,
+				otherReviewer(a.id).then((other) => !other),
 			]);
 			const n = (v: unknown) => Number(v);
 			return {
@@ -52,6 +69,10 @@ export const moneyActions: Record<string, Action> = {
 				shop: {
 					...settings().money_shop,
 					items: items.map((i: any) => ({ ...i, price: Number(i.price), active: !!i.active })),
+					remote_pending: remotePending.map((i: any) => ({ ...i, price: Number(i.price) })),
+					remote_pending_count: remotePendingCount.n,
+					self_review: selfReview,
+					remote_items: remoteItems.map((i: any) => ({ ...i, price: Number(i.price), active: !!i.active })),
 					badges,
 					pending: pendingOrders.map((o: any) => ({ ...o, price: Number(o.price) })),
 				},
@@ -107,27 +128,74 @@ export const moneyActions: Record<string, Action> = {
 			if (!name || [...name].length > 60) throw new AdminError("Item names are 1 to 60 characters.");
 			if ([...description].length > 240) throw new AdminError("Descriptions are up to 240 characters.");
 			const price = cents(b.price, "The item price", 1, 1_000_000_000);
-			const kind = b.kind === "announcement" ? "announcement" : b.kind === "badge" ? "badge" : null;
-			if (!kind) throw new AdminError("Choose a badge or announcement item.");
+			const kind = ["badge", "custom_badge", "announcement"].includes(String(b.kind)) ? String(b.kind) : null;
+			if (!kind) throw new AdminError("Choose an item type.");
 			let badgeId: string | null = null;
 			if (kind === "badge") {
 				badgeId = idOf(b.badgeId, "badge");
 				if (!(await sql`select 1 from custom_badges where id = ${badgeId}::bigint`).length) throw new AdminError("Choose an existing custom badge.");
 			}
 			const id = newId();
-			await sql`insert into money_shop_items (id, name, description, price_cents, kind, badge_id)
-				values (${id}::bigint, ${name}, ${description}, ${price}, ${kind}, ${badgeId}::bigint)`;
+			await sql`insert into money_shop_items (id, name, description, price_cents, kind, badge_id, active, status, created_by)
+				values (${id}::bigint, ${name}, ${description}, ${price}, ${kind}, ${badgeId}::bigint, false, 'pending', ${a.id}::bigint)`;
 			await audit(a, "money_shop_item_create", id, { name, price, kind, badgeId });
 			return { id };
+		},
+	},
+	reviewShopItem: {
+		role: "moderator",
+		run: async (a, b) => {
+			const id = idOf(b.id, "shop item");
+			const approve = b.approve === true;
+			const item = await sql.begin(async (tx) => {
+				const [row] = await tx`select name, status, created_by::text from money_shop_items where id = ${id}::bigint for update`;
+				if (!row) throw new AdminError("No such shop item.", 404);
+				if (row.status !== "pending") throw new AdminError("That shop item has already been reviewed.");
+				if (row.created_by === a.id && (await otherReviewer(a.id, tx))) throw new AdminError("A different staff member must review this shop item.");
+				await tx`update money_shop_items set status = ${approve ? "approved" : "rejected"}, active = ${approve},
+					approved_by = ${approve ? a.id : null}::bigint, approved_at = case when ${approve} then now() else null end
+					where id = ${id}::bigint`;
+				return row;
+			});
+			await audit(a, approve ? "money_shop_item_approve" : "money_shop_item_reject", id, { name: item.name });
+			return {};
+		},
+	},
+	reviewRemoteShopItem: {
+		role: "moderator",
+		run: async (a, b) => {
+			const origin = String(b.origin ?? "").toLowerCase();
+			if (!/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::\d{1,5})?$/.test(origin)) throw new AdminError("Choose a valid source instance.");
+			const id = idOf(b.id, "remote shop item");
+			const approve = b.approve === true;
+			const rows = await sql`update money_remote_shop_items set status = ${approve ? "approved" : "rejected"}, active = ${approve},
+				reviewed_by = ${a.id}::bigint, reviewed_at = now(), updated_at = now()
+				where origin = ${origin} and remote_id = ${id}::bigint and source_active and status = 'pending' returning name, price_cents::bigint as price`;
+			if (!rows.length) throw new AdminError("That imported listing is no longer waiting for review.");
+			await audit(a, approve ? "money_remote_shop_approve" : "money_remote_shop_reject", `${origin}/${id}`, { name: rows[0].name, price: Number(rows[0].price) });
+			return {};
 		},
 	},
 	setShopItem: {
 		role: "admin",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			const rows = await sql`update money_shop_items set active = ${b.active === true} where id = ${id}::bigint returning name, active`;
+			const rows = await sql`update money_shop_items set active = ${b.active === true} where id = ${id}::bigint and status = 'approved' returning name, active`;
 			if (!rows.length) throw new AdminError("No such shop item.", 404);
 			await audit(a, "money_shop_item_update", id, { active: rows[0].active });
+			return {};
+		},
+	},
+	setRemoteShopItem: {
+		role: "admin",
+		run: async (a, b) => {
+			const origin = String(b.origin ?? "").toLowerCase();
+			if (!/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::\d{1,5})?$/.test(origin)) throw new AdminError("Choose a valid source instance.");
+			const id = idOf(b.id, "remote shop item");
+			const rows = await sql`update money_remote_shop_items set active = ${b.active === true}, updated_at = now()
+				where origin = ${origin} and remote_id = ${id}::bigint and source_active and status = 'approved' returning name, active`;
+			if (!rows.length) throw new AdminError("No such approved imported listing.", 404);
+			await audit(a, "money_remote_shop_update", `${origin}/${id}`, { name: rows[0].name, active: rows[0].active });
 			return {};
 		},
 	},
@@ -141,6 +209,20 @@ export const moneyActions: Record<string, Action> = {
 					from money_shop_orders where id = ${id}::bigint for update`;
 				if (!order) throw new AdminError("No such shop request.", 404);
 				if (order.status !== "pending") throw new AdminError("That shop request has already been reviewed.");
+				if (approve && order.kind === "custom_badge") {
+					const name = String(order.payload?.name ?? "").trim();
+					const encoded = typeof order.payload?.image === "string" ? order.payload.image : "";
+					if (!name || [...name].length > 60 || !encoded || encoded.length > 350_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new AdminError("That badge request has invalid details; reject it to refund the user.");
+					const image = Buffer.from(encoded, "base64");
+					const info = sniffImage(image);
+					if (image.length > 256 * 1024 || !info || !BADGE_TYPES.includes(info.mime) || info.width > 1024 || info.height > 1024) throw new AdminError("That badge image is invalid; reject it to refund the user.");
+					const [count] = await tx`select count(*)::int as n from user_badges where user_id = ${order.user_id}::bigint`;
+					if (Number(count.n) >= 10) throw new AdminError("The user already has 10 custom badges; reject this request to refund it.");
+					const badgeId = newId();
+					await tx`insert into custom_badges (id, name, image, mime) values (${badgeId}::bigint, ${name}, ${image}, ${info.mime})`;
+					const [position] = await tx`select coalesce(max(position), -1) + 1 as n from user_badges where user_id = ${order.user_id}::bigint`;
+					await tx`insert into user_badges (user_id, badge_id, position) values (${order.user_id}::bigint, ${badgeId}::bigint, ${Number(position.n)})`;
+				}
 				if (approve && order.kind === "badge") {
 					const badgeId = idOf(order.payload?.badgeId, "badge");
 					if (!(await tx`select 1 from custom_badges where id = ${badgeId}::bigint`).length) throw new AdminError("That badge was removed; reject this request to refund it.");
@@ -172,10 +254,14 @@ export const moneyActions: Record<string, Action> = {
 		run: async (a, b) => {
 			const id = idOf(b.id);
 			return sql.begin(async (tx) => {
-				const [t] = await tx`select t.sender_id::text, t.recipient_id::text, t.amount_cents::bigint as amount, t.reversed_at, r.screen_name as recipient
-					from money_transfers t join users r on r.id = t.recipient_id where t.id = ${id}::bigint for update of t`;
+				const [t] = await tx`select t.sender_id::text, t.recipient_id::text, t.amount_cents::bigint as amount, t.reversed_at, t.federation_status,
+					r.screen_name as recipient, s.instance as sender_instance, r.instance as recipient_instance
+					from money_transfers t join users r on r.id = t.recipient_id join users s on s.id = t.sender_id where t.id = ${id}::bigint for update of t`;
 				if (!t) throw new AdminError("There's no such payment.", 404);
 				if (t.reversed_at) throw new AdminError("That payment was already reversed.");
+				if (t.federation_status === "pending") throw new AdminError("Wait for this federated transfer to settle before reversing it.");
+				if (t.federation_status === "failed") throw new AdminError("That transfer failed and the money was already refunded.");
+				if (t.sender_instance || t.recipient_instance) throw new AdminError("Federated payments cannot be reversed from this instance.");
 				const amount = Number(t.amount);
 				const wallets = await tx`select user_id::text, balance_cents from money_wallets where user_id in (${t.sender_id}::bigint, ${t.recipient_id}::bigint) order by user_id for update`;
 				const theirs = Number(wallets.find((w: any) => w.user_id === t.recipient_id)?.balance_cents ?? 0);

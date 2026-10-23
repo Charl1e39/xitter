@@ -86,7 +86,7 @@ async function items(viewerId: string, opts: { before?: number; after?: number; 
 			where user_id = ${viewerId}::bigint and resolved_at >= ${lo} and resolved_at < ${hi} order by resolved_at desc limit ${opts.limit}`;
 		for (const r of appeals)
 			out.push({ kind: "staff", key: `appeal-${r.id}`, at: ms(r.at), text: `${team[0].toUpperCase()}${team.slice(1)} ${r.status === "accepted" ? "accepted" : "turned down"} your appeal.` });
-		// X Money's, while it is switched on (money.ts)
+		// Equicoins, while it is switched on (money.ts)
 		if (feature("money")) {
 			const paid = await sql`select t.id, t.sender_id, t.amount_cents, t.note, t.created_at as at from money_transfers t
 				where t.recipient_id = ${viewerId}::bigint and t.sender_id not in ${hidden} and t.created_at >= ${lo} and t.created_at < ${hi}

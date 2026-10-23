@@ -16,9 +16,9 @@
 	nav { border-right: 1px solid var(--line); padding: 16px 12px; position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; -ms-overflow-style: none; }
 	nav::-webkit-scrollbar { display: none; }
 	nav .logo { width: 128px; margin: 4px 8px 20px; display: block; }
-	nav button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 12px; border: 0; border-radius: 999px; background: none; color: var(--text); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
-	nav button:hover { background: var(--panel); }
-	nav button.on { font-weight: 700; }
+	nav button, nav a[data-page] { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 12px; border: 0; border-radius: 999px; background: none; color: var(--text); font: inherit; font-size: 15px; text-align: left; text-decoration: none; cursor: pointer; }
+	nav button:hover, nav a[data-page]:hover { background: var(--panel); }
+	nav button.on, nav a[data-page].on { font-weight: 700; }
 	/* 28 pages didn't fit a laptop screen: they sit in collapsible groups */
 	nav .ghead { margin-top: 6px; color: var(--dim); font-size: 14px; font-weight: 600; }
 	nav .ghead > span:first-child { flex: 1; }
@@ -99,6 +99,7 @@
 	.audit-entry-heading h2 { margin: 0; font-size: 16px; text-transform: capitalize; }
 	.audit-entry-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 	.audit-entry-body { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 18px; align-items: start; }
+	.audit-entry-body.no-target { grid-template-columns: minmax(0, 1fr); }
 	.audit-entry-target, .audit-entry-detail { min-width: 0; }
 	.audit-entry-target { max-width: min(280px, 35vw); overflow-wrap: anywhere; }
 	.audit-entry-detail pre { max-height: 140px; margin: 4px 0 0; padding: 7px 9px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: transparent; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -212,6 +213,12 @@
 	.box h2 { margin-top: 0; }
 	.field { display: grid; gap: 4px; margin-bottom: 10px; }
 	.field label { color: var(--dim); font-size: 13px; }
+	.shop-picker { position: relative; }
+	.shop-picker-trigger { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+	.shop-picker-trigger:focus-visible { outline: 2px solid var(--blue); border-color: transparent; }
+	.shop-picker-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; max-height: 240px; overflow: auto; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: #202327; box-shadow: 0 8px 24px #0009; }
+	.shop-picker-option { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+	.shop-picker-option:hover, .shop-picker-option[aria-selected="true"] { background: #2c3136; }
 	.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 	.ann-buttons { display: grid; gap: 8px; }
 	.ann-row [data-label] { flex: 1 1 140px; min-width: 0; }
@@ -342,7 +349,7 @@
 <body>
 <div class="app">
 	<nav id="nav">
-		<img class="logo" src="/public/logo-dark.png" alt="{{instance}}">
+		<a class="logo-link" href="/home" aria-label="Back to {{instance}} home"><img class="logo" src="/public/logo-dark.png" alt="{{instance}}"></a>
 	</nav>
 	<main id="main"></main>
 </div>
@@ -445,7 +452,7 @@ const PAGES = {
 	apps: { icon: "devices", title: "Client apps" },
 	oauth: { icon: "key", title: "OAuth apps" },
 	federation: { icon: "hub", title: "Federation" },
-	money: { icon: "payments", title: "Money", needs: "moderator" },
+	money: { icon: "payments", title: "Equicoins", needs: "moderator" },
 	settings: { icon: "tune", title: "Settings" },
 	"settings-account": { icon: "manage_accounts", title: "Sign-up & features" },
 	"settings-limits": { icon: "speed", title: "Limits" },
@@ -835,7 +842,7 @@ const RENDER = {
 		main.innerHTML = "<h1>Badges</h1>" +
 			'<p class="dim">A custom badge is a small image after an account\'s name, in the slot where X shows an organisation\'s badge. Give one to an account on its page. An organisation can also use one for its affiliates instead of its profile picture.</p>' +
 			(can("createBadge") ? '<div class="box" style="margin-bottom:16px"><h2>New badge</h2><div class="row"><input id="bn" placeholder="Name, shown on hover" maxlength="60" style="flex:1;min-width:180px">' +
-				'<label class="btn">Choose image<input type="file" id="bf" accept="image/png,image/jpeg,image/webp" hidden></label><span class="dim small" id="bfname">PNG, JPEG or WebP, square, up to 256 KB</span>' +
+				'<label class="btn">Choose image<input type="file" id="bf" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label><span class="dim small" id="bfname">PNG, JPEG, WebP or GIF, square, up to 256 KB</span>' +
 				'<button class="btn primary" id="bc">Create</button></div></div>' : "") +
 			(badges.length ? '<div class="bar"><input id="badge-search" type="search" placeholder="Search badges by name" aria-label="Search badges"><span class="dim small" id="badge-count" role="status"></span></div>' : "") +
 			'<div class="scroll">' + (badges.length
@@ -978,8 +985,14 @@ const RENDER = {
 		const dollars = (c) => String(c / 100);
 		const cards = (list) => '<div class="cards">' + list.map(([k, v]) => '<div class="card"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>").join("") + "</div>";
 		const t = m.totals;
-		main.innerHTML = "<h1>Money</h1>" +
-			'<p class="dim">X Money, the instance\'s own play money: accounts send it to each other, ask for it and earn it from likes. It has no cash value. ' +
+		const pendingShopItems = m.shop.items.filter((i) => i.status === "pending");
+		const shopReview = '<div class="box" style="margin-top:12px"><h2>Listings to review (' + pendingShopItems.length + ')</h2><p class="dim small">A different staff member must approve each listing before it appears in the shop or can be shared with other instances. When you\'re the only staff member, you approve your own.</p>' + (pendingShopItems.length ? '<div class="list">' + pendingShopItems.map((i) => '<div class="row" style="justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);align-items:flex-start"><div style="min-width:0">' + (i.kind === "badge" && i.badge_id ? '<img src="/public/badge-' + esc(i.badge_id) + '.png" alt="Badge artwork" style="width:48px;height:48px;object-fit:contain;vertical-align:middle;margin-right:8px;border:1px solid var(--line);border-radius:8px;padding:4px">' : '') + '<b>' + esc(i.name) + '</b><span class="dim small"> · ' + usd(i.price) + ' · ' + esc(i.kind === "badge" ? i.badge_name : i.kind === "custom_badge" ? "custom badge request" : "announcement") + '</span><div class="dim small" style="margin-top:4px">' + esc(i.description || "No description") + ' · added by @' + esc(i.creator || "unknown") + '</div></div>' + (staff && (i.created_by !== me.id || m.shop.self_review) ? '<span class="row"><button class="btn primary" data-shop-item-review="' + esc(i.id) + '" data-approve="1">Approve listing</button><button class="btn danger" data-shop-item-review="' + esc(i.id) + '" data-approve="0">Reject</button></span>' : '<span class="dim small">Waiting for another staff member</span>') + '</div>').join("") + '</div>' : '<p class="dim small">No listings need review.</p>') + '</div>';
+		const remotePendingItems = m.shop.remote_pending || [];
+		const remoteShopReview = '<div class="box" style="margin-top:12px"><h2>Imported listings to review (' + (m.shop.remote_pending_count ?? remotePendingItems.length) + ')</h2><p class="dim small">Listings from other instances stay hidden here until local staff approve them. Changed listings return to review.</p>' + (remotePendingItems.length ? '<div class="list">' + remotePendingItems.map((i) => '<div class="row" style="justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);align-items:flex-start"><div style="min-width:0">' + (i.badge_data ? '<img src="data:' + esc(i.badge_mime) + ';base64,' + esc(i.badge_data) + '" alt="Imported badge artwork" style="width:48px;height:48px;object-fit:contain;vertical-align:middle;margin-right:8px;border:1px solid var(--line);border-radius:8px;padding:4px">' : '') + '<b>' + esc(i.name) + '</b><span class="dim small"> · ' + usd(i.price) + ' · ' + esc(i.kind === "badge" ? i.badge_name : i.kind === "custom_badge" ? "custom badge request" : "announcement") + '</span><div class="dim small" style="margin-top:4px">' + esc(i.description || "No description") + ' · from ' + esc(i.origin) + '</div></div>' + (staff ? '<span class="row"><button class="btn primary" data-remote-shop-review="' + esc(i.origin) + '" data-id="' + esc(i.id) + '" data-approve="1">Approve here</button><button class="btn danger" data-remote-shop-review="' + esc(i.origin) + '" data-id="' + esc(i.id) + '" data-approve="0">Reject</button></span>' : '') + '</div>').join("") + '</div>' : '<p class="dim small">No imported listings need review.</p>') + '</div>';
+		const remoteShopItems = m.shop.remote_items || [];
+		const remoteShopControls = '<div class="box" style="margin-top:12px"><h2>Approved imported listings (' + remoteShopItems.length + ')</h2>' + (remoteShopItems.length ? '<div class="list">' + remoteShopItems.map((i) => '<div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:12px;padding:8px 0;border-top:1px solid var(--line)"><span><b>' + esc(i.name) + '</b><span class="dim small"> · ' + usd(i.price) + ' · ' + esc(i.kind) + ' · ' + esc(i.origin) + (i.active ? ' · visible' : ' · hidden here') + '</span></span>' + (admin ? '<button class="btn" data-remote-shop-active="' + esc(i.origin) + '" data-id="' + esc(i.id) + '" data-active="' + i.active + '">' + (i.active ? 'Hide here' : 'Show here') + '</button>' : '') + '</div>').join("") + '</div>' : '<p class="dim small">No approved listings from other instances.</p>') + '</div>';
+		main.innerHTML = "<h1>Equicoins</h1>" +
+			'<p class="dim">Equicoins, the instance\'s own play money: accounts send it to each other, ask for it and earn it from likes. It has no cash value. ' +
 			(m.enabled ? "It's on; Settings › Features turns it off." : '<b>It\'s off</b>: Settings › Features turns it on.') + "</p>" +
 			cards([["In circulation", usd(t.circulation)], ["Wallets", t.wallets], ["Payments", t.payments], ["Moved", usd(t.volume)], ["Payments this week", t.payments_week], ["Moved this week", usd(t.volume_week)], ["Paid for likes", usd(t.likes_paid)], ["Open requests", t.open_requests], ["Merchants", t.merchants]]) +
 			'<div class="grid2" style="margin-top:16px">' +
@@ -995,12 +1008,12 @@ const RENDER = {
 			(admin ? '<button class="btn" id="madj">Apply</button>' : "") + "</div>" +
 			'<div class="box"><h2>Biggest balances</h2>' + (m.top.length ? '<div class="list">' + m.top.map((u, i) => '<p class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="dim small">' + (i + 1) + '.</span> <a target="_blank" href="/' + esc(u.screen_name) + '">' + esc(u.name || u.screen_name) + "</a> " + badge(u) + ' <span class="dim small">@' + esc(u.screen_name) + "</span></span><b>" + usd(u.balance) + "</b></p>").join("") + "</div>" : '<p class="dim small">No wallets yet.</p>') + "</div>" +
 			"</div>" +
-			'<section style="margin-top:20px"><h2>Shop</h2><p class="dim">Sell custom badges and announcement slots for X Money. Purchases are charged while pending. Staff approval delivers the item; rejecting a request refunds it.</p>' +
-			'<div class="box" style="margin-top:12px"><label class="row"><input type="checkbox" id="shopOn"' + (m.shop.enabled ? " checked" : "") + (admin ? "" : " disabled") + '> X Money shop is open</label>' +
+			'<section style="margin-top:20px"><h2>Shop</h2><p class="dim">Sell custom badges and announcement slots for Equicoins. Purchases are charged while pending. Staff approval delivers the item; rejecting a request refunds it.</p>' +
+			'<div class="box" style="margin-top:12px"><label class="row"><input type="checkbox" id="shopOn"' + (m.shop.enabled ? " checked" : "") + (admin ? "" : " disabled") + '> Equicoins shop is open</label>' +
 			(admin ? '<div class="field" style="margin-top:12px"><label>New item name</label><input id="shopName" maxlength="60" placeholder="Community badge"></div><div class="field"><label>Description</label><input id="shopDesc" maxlength="240" placeholder="A badge for your profile"></div>' +
-			'<div class="field"><label>Price ($)</label><input id="shopPrice" inputmode="decimal" placeholder="5"></div><div class="field"><label>What it gives</label><select id="shopKind"><option value="badge">Custom badge</option><option value="announcement">Custom announcement</option></select></div>' +
-			'<div class="field" id="shopBadgeField"><label>Badge</label><select id="shopBadge"><option value="">Choose a badge</option>' + m.shop.badges.map((b) => '<option value="' + esc(b.id) + '">' + esc(b.name) + "</option>").join("") + '</select></div><button class="btn primary" id="shopCreate">Add shop item</button>' : "") + "</div>" +
-			'<div class="grid2" style="margin-top:12px"><div class="box"><h2>Items</h2>' + (m.shop.items.length ? '<div class="list">' + m.shop.items.map((i) => '<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><span><b>' + esc(i.name) + '</b><span class="dim small"> · ' + usd(i.price) + ' · ' + esc(i.kind === "badge" ? i.badge_name : "announcement") + (i.active ? "" : " · hidden") + '</span></span>' + (admin ? '<button class="btn" data-shop-active="' + esc(i.id) + '" data-active="' + i.active + '">' + (i.active ? "Hide" : "Show") + "</button>" : "") + "</div>").join("") + "</div>" : '<p class="dim small">No items yet. Make custom badges on the Badges page, then list them here.</p>') + '</div><div class="box"><h2>Waiting for approval (' + m.shop.pending.length + ')</h2>' + (m.shop.pending.length ? '<div class="list">' + m.shop.pending.map((o) => '<div class="box" style="margin:8px 0"><div class="row" style="justify-content:space-between"><b>' + esc(o.item_name) + '</b><span>' + usd(o.price) + '</span></div><p class="dim small">@' + esc(o.screen_name) + ' · ' + esc(o.kind) + ' · ' + esc(when(o.created_at)) + '</p>' + (o.kind === "announcement" ? '<p style="white-space:pre-wrap;margin-top:8px">' + esc(o.payload?.text || "") + (o.payload?.link ? '<br><a target="_blank" href="' + esc(o.payload.link) + '">' + esc(o.payload.link) + '</a>' : "") + '</p>' : "") +
+			'<div class="field"><label>Price ($)</label><input id="shopPrice" inputmode="decimal" placeholder="5"></div><div class="field"><label>What it gives</label><div class="shop-picker" data-shop-picker><input type="hidden" id="shopKind" value="badge"><button type="button" class="shop-picker-trigger" aria-haspopup="listbox" aria-expanded="false"><span>Custom badge</span><span aria-hidden="true">⌄</span></button><div class="shop-picker-menu" role="listbox" hidden><button type="button" class="shop-picker-option" role="option" data-value="badge" aria-selected="true">Custom badge</button><button type="button" class="shop-picker-option" role="option" data-value="custom_badge" aria-selected="false">Request a custom badge</button><button type="button" class="shop-picker-option" role="option" data-value="announcement" aria-selected="false">Custom announcement</button></div></div></div>' +
+			'<div class="field" id="shopBadgeField"><label>Badge</label><div class="shop-picker" data-shop-picker><input type="hidden" id="shopBadge" value=""><button type="button" class="shop-picker-trigger" aria-haspopup="listbox" aria-expanded="false"><span>Choose a badge</span><span aria-hidden="true">⌄</span></button><div class="shop-picker-menu" role="listbox" hidden><button type="button" class="shop-picker-option" role="option" data-value="" aria-selected="true">Choose a badge</button>' + m.shop.badges.map((b) => '<button type="button" class="shop-picker-option" role="option" data-value="' + esc(b.id) + '" aria-selected="false">' + esc(b.name) + "</button>").join("") + '</div></div></div><button class="btn primary" id="shopCreate">Add shop item</button>' : "") + "</div>" +
+			remoteShopReview + remoteShopControls + shopReview + '<div class="grid2" style="margin-top:12px"><div class="box"><h2>Items</h2>' + (m.shop.items.length ? '<div class="list">' + m.shop.items.map((i) => '<div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:12px;padding:8px 0;border-top:1px solid var(--line)"><span style="min-width:0"><b>' + esc(i.name) + '</b><span class="dim small"> · ' + usd(i.price) + ' · ' + esc(i.kind === "badge" ? i.badge_name : i.kind === "custom_badge" ? "custom badge request" : "announcement") + ' · ' + esc(i.status === "pending" ? "awaiting review" : i.status === "rejected" ? "rejected" : i.active ? "visible" : "hidden") + '</span></span>' + (admin && i.status === "approved" ? '<button class="btn" data-shop-active="' + esc(i.id) + '" data-active="' + i.active + '">' + (i.active ? "Hide" : "Show") + "</button>" : "") + "</div>").join("") + "</div>" : '<p class="dim small">No items yet. Make custom badges on the Badges page, then list them here.</p>') + '</div><div class="box"><h2>Waiting for approval (' + m.shop.pending.length + ')</h2>' + (m.shop.pending.length ? '<div class="list">' + m.shop.pending.map((o) => '<div class="box" style="margin:8px 0"><div class="row" style="justify-content:space-between"><b>' + esc(o.item_name) + '</b><span>' + usd(o.price) + '</span></div><p class="dim small">@' + esc(o.screen_name) + ' · ' + esc(o.kind) + ' · ' + esc(when(o.created_at)) + '</p>' + (o.kind === "announcement" ? '<p style="white-space:pre-wrap;margin-top:8px">' + esc(o.payload?.text || "") + (o.payload?.link ? '<br><a target="_blank" href="' + esc(o.payload.link) + '">' + esc(o.payload.link) + '</a>' : "") + '</p>' : o.kind === "custom_badge" ? '<div class="row" style="margin-top:8px"><img src="data:' + esc(o.payload?.mime || "image/png") + ';base64,' + esc(o.payload?.image || "") + '" alt="Requested badge preview" style="width:64px;height:64px;object-fit:contain;border:1px solid var(--line);border-radius:8px;padding:6px"><span>Requested badge: <b>' + esc(o.payload?.name || "(unnamed)") + '</b></span></div>' : "") +
 				(staff ? '<div class="row" style="margin-top:8px"><button class="btn primary" data-shop-review="' + esc(o.id) + '" data-approve="1">Approve</button><button class="btn danger" data-shop-review="' + esc(o.id) + '" data-approve="0">Reject and refund</button></div>' : "") + "</div>").join("") + "</div>" : '<p class="dim small">Nothing waiting for review.</p>') + "</div></div></section>" +
 			'<h2>Payments</h2><div class="row" style="margin-bottom:12px"><input id="mq" placeholder="Payments to or from @username" value="' + esc(q) + '" style="flex:1;min-width:200px"><button class="btn" id="mqs">Search</button></div>' +
 			'<div class="scroll">' + (m.recent.length
@@ -1010,15 +1023,37 @@ const RENDER = {
 				: '<div class="empty">No payments' + (q ? " for @" + esc(q) : "") + ".</div>") + "</div>";
 		const again = () => this.money(main, $("#mq").value);
 		if ($("#shopOn")) $("#shopOn").onchange = () => act(() => api("saveShop", { enabled: $("#shopOn").checked }), "Shop setting saved").then(again);
-		if ($("#shopKind")) $("#shopKind").onchange = () => { $("#shopBadgeField").hidden = $("#shopKind").value !== "badge"; };
+		main.querySelectorAll("[data-shop-picker]").forEach((picker) => {
+			const trigger = picker.querySelector(".shop-picker-trigger");
+			const menu = picker.querySelector(".shop-picker-menu");
+			trigger.onclick = () => { main.querySelectorAll(".shop-picker-menu").forEach((m) => { if (m !== menu) { m.hidden = true; m.previousElementSibling.setAttribute("aria-expanded", "false"); } }); menu.hidden = !menu.hidden; trigger.setAttribute("aria-expanded", String(!menu.hidden)); };
+			picker.querySelectorAll("[data-value]").forEach((option) => option.onclick = () => {
+				picker.querySelector("input[type=hidden]").value = option.dataset.value;
+				trigger.querySelector("span").textContent = option.textContent;
+				picker.querySelectorAll("[role=option]").forEach((o) => o.setAttribute("aria-selected", String(o === option)));
+				menu.hidden = true; trigger.setAttribute("aria-expanded", "false");
+				if (picker.querySelector("#shopKind")) $("#shopBadgeField").hidden = option.dataset.value !== "badge";
+			});
+		});
 		if ($("#shopCreate")) $("#shopCreate").onclick = () => act(() => api("createShopItem", { name: $("#shopName").value, description: $("#shopDesc").value, price: $("#shopPrice").value, kind: $("#shopKind").value, badgeId: $("#shopBadge").value }), "Shop item created").then(again);
+		main.querySelectorAll("[data-shop-item-review]").forEach((b) => b.onclick = async () => {
+			const approve = b.dataset.approve === "1";
+			if (!(await ask((approve ? "Approve" : "Reject") + " this shop listing?"))) return;
+			act(() => api("reviewShopItem", { id: b.dataset.shopItemReview, approve }), approve ? "Listing approved" : "Listing rejected").then(again);
+		});
+		main.querySelectorAll("[data-remote-shop-review]").forEach((b) => b.onclick = async () => {
+			const approve = b.dataset.approve === "1";
+			if (!(await ask((approve ? "Approve" : "Reject") + " this imported listing from " + b.dataset.remoteShopReview + "?"))) return;
+			act(() => api("reviewRemoteShopItem", { origin: b.dataset.remoteShopReview, id: b.dataset.id, approve }), approve ? "Imported listing approved here" : "Imported listing rejected").then(again);
+		});
+		main.querySelectorAll("[data-remote-shop-active]").forEach((b) => b.onclick = () => act(() => api("setRemoteShopItem", { origin: b.dataset.remoteShopActive, id: b.dataset.id, active: b.dataset.active !== "true" }), "Imported listing updated here").then(again));
 		main.querySelectorAll("[data-shop-active]").forEach((b) => b.onclick = () => act(() => api("setShopItem", { id: b.dataset.shopActive, active: b.dataset.active !== "true" }), "Shop item updated").then(again));
 		main.querySelectorAll("[data-shop-review]").forEach((b) => b.onclick = async () => {
 			const approve = b.dataset.approve === "1";
 			if (!(await ask((approve ? "Approve" : "Reject and refund") + " this shop request?"))) return;
 			act(() => api("reviewShopOrder", { id: b.dataset.shopReview, approve }), approve ? "Shop request approved" : "Request rejected and refunded").then(again);
 		});
-		if ($("#msave")) $("#msave").onclick = () => act(() => api("saveMoney", { starting: $("#ms").value, max_transfer: $("#mx").value, like: $("#ml").value }), "Money settings saved").then(again);
+		if ($("#msave")) $("#msave").onclick = () => act(() => api("saveMoney", { starting: $("#ms").value, max_transfer: $("#mx").value, like: $("#ml").value }), "Equicoins settings saved").then(again);
 		if ($("#madj")) $("#madj").onclick = () => act(async () => { const r = await api("adjustMoney", { handle: $("#mah").value, amount: $("#maa").value }); notice("@" + r.to + " now has " + usd(r.balance)); }).then(again);
 		$("#mqs").onclick = again;
 		$("#mq").onkeydown = (e) => { if (e.key === "Enter") again(); };
@@ -1938,7 +1973,7 @@ const RENDER = {
 			(entries.length ? '<div class="audit-list">' + entries.map((e) => {
 				const target = e.target_name ? '<a href="#user/' + esc(e.target) + '">@' + esc(e.target_name) + "</a>" : e.target ? esc(e.target) : "";
 				return '<article class="audit-entry"><div class="audit-entry-heading"><div><h2>' + esc(e.action.replace(/_/g, " ")) + '</h2><span class="dim small">' + esc(when(e.created_at)) + '</span></div><div class="audit-entry-meta">' + (e.automatic ? '<span class="pill">automatic</span>' : '<span class="dim small">by</span> @' + esc(e.actor ?? "?")) + '</div></div>' +
-					'<div class="audit-entry-body">' + (target ? '<div class="audit-entry-target"><span class="dim small">Target</span><div>' + target + '</div></div>' : "") +
+					'<div class="audit-entry-body' + (target ? "" : " no-target") + '">' + (target ? '<div class="audit-entry-target"><span class="dim small">Target</span><div>' + target + '</div></div>' : "") +
 					'<div class="audit-entry-detail"><span class="dim small">Details</span><pre>' + esc(e.detail ? JSON.stringify(e.detail) : "—") + "</pre></div></div></article>";
 			}).join("") + "</div>" : '<div class="empty">No audit entries match these filters.</div>') + pager;
 		let timer;
@@ -2208,7 +2243,7 @@ async function renderUser(main, id) {
 		$("#main").innerHTML = '<div class="empty">' + esc(e.message) + ' <a href="/home">Back to {{instance}}</a></div>';
 		return;
 	}
-	const item = (k) => '<button data-page="' + k + '"><span class="icon">' + PAGES[k].icon + "</span>" + esc(PAGES[k].title) + "</button>";
+	const item = (k) => '<a href="/admin#' + encodeURIComponent(k) + '" data-page="' + esc(k) + '"><span class="icon">' + PAGES[k].icon + "</span>" + esc(PAGES[k].title) + "</a>";
 	$("#nav").insertAdjacentHTML("beforeend", GROUPS.map(([title, keys]) => {
 		const shown = keys.filter((k) => PAGES[k] && (!PAGES[k].needs || can(PAGES[k].needs)));
 		if (!shown.length) return "";
@@ -2222,10 +2257,8 @@ async function renderUser(main, id) {
 		'<div class="who">@' + esc(me.screen_name) + " · " + esc(me.superadmin ? "superadmin" : me.role) + "</div></div>");
 	document.querySelectorAll("nav [data-page]").forEach((b) => {
 		b.onclick = (e) => {
-			if (e.ctrlKey || e.metaKey) { e.preventDefault(); openAdminRoute(b.dataset.page); }
-			else if (e.button === 0) go(b.dataset.page);
+			if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) { e.preventDefault(); go(b.dataset.page); }
 		};
-		b.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); openAdminRoute(b.dataset.page); } });
 	});
 	document.querySelectorAll("nav .ghead").forEach((h) => h.onclick = () => {
 		const g = h.parentNode, on = !g.classList.contains("open");

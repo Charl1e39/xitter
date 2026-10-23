@@ -27,7 +27,7 @@ export const FEATURES = {
 	notes_everyone: "Anyone can write Community Notes (off: only accounts given access on their admin page)",
 	link_previews: "Previews of public posts and profiles when their links are shared in other apps",
 	archive_import: "Import from X: accounts upload their X archive and its posts come over (Settings > Your account)",
-	money: "X Money: accounts send each other money from the side bar (the instance's own play money, not real currency)",
+	money: "Equicoins: accounts send each other money from the side bar (the instance's own play money, not real currency)",
 } as const;
 export type Feature = keyof typeof FEATURES;
 

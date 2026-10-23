@@ -1581,7 +1581,7 @@ alter table migration_objects add column if not exists created_at timestamptz no
 -- where an account went, as handle@instance; set by the new instance when the import finished
 alter table users add column if not exists moved_to text;
 alter table users add column if not exists moved_at timestamptz;
--- X Money (money.ts): each account's balance in cents, made on first use with
+-- Equicoins (money.ts): each account's balance in cents, made on first use with
 -- the instance's starting balance, and every transfer between accounts
 create table if not exists money_wallets (
 	user_id bigint primary key references users (id) on delete cascade,
@@ -1598,6 +1598,28 @@ create table if not exists money_transfers (
 	idem text not null,
 	created_at timestamptz not null default now(),
 	check (sender_id <> recipient_id)
+);
+alter table money_transfers add column if not exists federation_status text not null default 'complete';
+alter table money_transfers drop constraint if exists money_transfers_federation_status_check;
+alter table money_transfers add constraint money_transfers_federation_status_check check (federation_status in ('pending', 'complete', 'failed'));
+create table if not exists money_federation_outbox (
+	transfer_id bigint primary key references money_transfers(id) on delete cascade,
+	destination text not null,
+	sender_id bigint not null references users(id) on delete cascade,
+	recipient_id bigint not null,
+	amount_cents bigint not null check (amount_cents > 0),
+	note text not null default '',
+	attempts int not null default 0,
+	next_attempt timestamptz not null default now(),
+	last_error text,
+	created_at timestamptz not null default now()
+);
+create index if not exists money_federation_outbox_due_idx on money_federation_outbox (next_attempt) where attempts >= 0;
+create table if not exists money_federation_receipts (
+	origin text not null,
+	transfer_id bigint not null,
+	created_at timestamptz not null default now(),
+	primary key (origin, transfer_id)
 );
 create unique index if not exists money_transfers_idem_idx on money_transfers (sender_id, idem);
 create index if not exists money_transfers_sender_idx on money_transfers (sender_id, id desc);
@@ -1619,7 +1641,7 @@ create table if not exists money_requests (
 create index if not exists money_requests_requester_idx on money_requests (requester_id, id desc);
 create index if not exists money_requests_payer_idx on money_requests (payer_id, id desc) where payer_id is not null;
 alter table money_transfers add column if not exists request_id bigint references money_requests (id) on delete set null;
--- merchant mode (Settings > X Money), for gold organisations: payments to
+-- merchant mode (Settings > Equicoins), for gold organisations: payments to
 -- them read as purchases ("$3.52 at Taco Bell")
 create table if not exists money_merchants (
 	user_id bigint primary key references users (id) on delete cascade,
@@ -1637,35 +1659,76 @@ create table if not exists money_like_rewards (
 	primary key (post_id, liker_id)
 );
 create index if not exists money_like_rewards_author_idx on money_like_rewards (author_id, created_at desc);
--- X Money shop: listings can award an existing custom badge or submit an
+-- Equicoins shop: listings can award an existing custom badge or submit an
 -- instance announcement for staff approval. Orders hold the price until reviewed.
 create table if not exists money_shop_items (
 	id bigint primary key,
 	name text not null check (char_length(name) between 1 and 60),
 	description text not null default '' check (char_length(description) <= 240),
 	price_cents bigint not null check (price_cents > 0),
-	kind text not null check (kind in ('badge', 'announcement')),
+	kind text not null check (kind in ('badge', 'custom_badge', 'announcement')),
 	badge_id bigint references custom_badges(id) on delete set null,
 	active boolean not null default true,
+	status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+	created_by bigint references users(id) on delete set null,
+	approved_by bigint references users(id) on delete set null,
+	approved_at timestamptz,
 	created_at timestamptz not null default now(),
-	check ((kind = 'badge' and badge_id is not null) or kind = 'announcement')
+	check ((kind = 'badge' and badge_id is not null) or kind in ('custom_badge', 'announcement'))
 );
+alter table money_shop_items add column if not exists status text not null default 'pending';
+alter table money_shop_items add column if not exists created_by bigint references users(id) on delete set null;
+alter table money_shop_items add column if not exists approved_by bigint references users(id) on delete set null;
+alter table money_shop_items add column if not exists approved_at timestamptz;
+alter table money_shop_items drop constraint if exists money_shop_items_status_check;
+alter table money_shop_items add constraint money_shop_items_status_check check (status in ('pending', 'approved', 'rejected'));
+-- Existing listings must be reviewed under the new policy before anyone can buy them.
+update money_shop_items set active = false where status = 'pending';
+alter table money_shop_items drop constraint if exists money_shop_items_kind_check;
+alter table money_shop_items add constraint money_shop_items_kind_check check (kind in ('badge', 'custom_badge', 'announcement'));
+alter table money_shop_items drop constraint if exists money_shop_items_check;
+alter table money_shop_items add constraint money_shop_items_check check ((kind = 'badge' and badge_id is not null) or kind in ('custom_badge', 'announcement'));
+-- Federated listings are cached for review on every receiving instance. They
+-- stay hidden until a local moderator approves them, and source changes reset
+-- that approval so edited listings are reviewed again.
+create table if not exists money_remote_shop_items (
+	origin text not null,
+	remote_id bigint not null,
+	name text not null,
+	description text not null default '',
+	price_cents bigint not null check (price_cents > 0),
+	kind text not null check (kind in ('badge', 'custom_badge', 'announcement')),
+	badge_name text,
+	badge_image bytea,
+	badge_mime text,
+	source_active boolean not null default true,
+	status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+	active boolean not null default false,
+	reviewed_by bigint references users(id) on delete set null,
+	reviewed_at timestamptz,
+	updated_at timestamptz not null default now(),
+	primary key (origin, remote_id),
+	check ((kind = 'badge' and badge_name is not null and badge_image is not null and badge_mime is not null) or kind <> 'badge')
+);
+create index if not exists money_remote_shop_visible_idx on money_remote_shop_items (origin, updated_at desc) where source_active and active and status = 'approved';
 create table if not exists money_shop_orders (
 	id bigint primary key,
 	user_id bigint not null references users(id) on delete cascade,
 	item_id bigint references money_shop_items(id) on delete set null,
 	item_name text not null,
 	price_cents bigint not null check (price_cents > 0),
-	kind text not null check (kind in ('badge', 'announcement')),
+	kind text not null check (kind in ('badge', 'custom_badge', 'announcement')),
 	payload jsonb not null default '{}'::jsonb,
 	status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
 	created_at timestamptz not null default now(),
 	reviewed_at timestamptz,
 	reviewed_by bigint references users(id) on delete set null
 );
+alter table money_shop_orders drop constraint if exists money_shop_orders_kind_check;
+alter table money_shop_orders add constraint money_shop_orders_kind_check check (kind in ('badge', 'custom_badge', 'announcement'));
 create index if not exists money_shop_orders_pending_idx on money_shop_orders (created_at) where status = 'pending';
 create index if not exists money_shop_orders_user_idx on money_shop_orders (user_id, id desc);
--- when the account accepted X Money's disclaimer (money-page.ts), shown the first time Money opens
+-- when the account accepted Equicoins' disclaimer (money-page.ts), shown the first time Equicoins opens
 alter table money_wallets add column if not exists disclaimer_at timestamptz;
 -- a payment staff reversed (Admin > Money): the money went back to its sender
 alter table money_transfers add column if not exists reversed_at timestamptz;

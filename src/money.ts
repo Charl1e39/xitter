@@ -1,8 +1,6 @@
-// X Money: every account has a wallet and sends money to other accounts on
-// this instance, asks for it (a request of one account, or a "Pay @name" card
-// anyone can pay) and earns it from likes on its posts. It is the instance's
-// own play money: a new wallet starts with the instance's starting balance
-// (settings.ts money), and admins add more. Nothing is paid in or out.
+// Equicoins wallets live on each account's home instance. Signed, idempotent
+// transfers move money between peers; a local author can earn from remote
+// likes on their posts. A new wallet starts with its home instance's balance.
 // The pages are money-page.ts; the client's side is money-ui.ts.
 
 import { audit } from "./admin";
@@ -18,6 +16,7 @@ import { absolute } from "./media";
 import { avatarUrl } from "./model";
 import { feature, hasBlockedPhrase, settings } from "./settings";
 import { MONEY_ICON } from "./tidy";
+import { isPeer } from "./federation";
 
 export const NOTE_MAX = 140;
 // a requester's requests of other accounts still waiting at once
@@ -54,13 +53,13 @@ export async function balanceOf(userId: string): Promise<number> {
 	return Number(w.balance_cents);
 }
 
-// what an account accepts before Money opens, on the page and through the API
+// what an account accepts before Equicoins opens, on the page and through the API
 export const disclaimerText = () => {
-	const instance = settings().instance_name, name = `${instance} Money`;
-	return `${name} is a virtual currency used solely within the ${instance} platform. It has no real-world monetary value, is not legal tender, and cannot be exchanged for real money, cryptocurrency, or other monetary assets. ${name} is for entertainment and platform use only.`;
+	const instance = settings().instance_name, name = `${instance} Equicoins`;
+	return `${name} is virtual currency for use on this instance and participating Xitter instances. It has no real-world monetary value, is not legal tender, and cannot be exchanged for real money, cryptocurrency, or other monetary assets. It is for entertainment and platform use only.`;
 };
 
-// the disclaimer, accepted once per account before Money opens (money-page.ts)
+// the disclaimer, accepted once per account before Equicoins opens (money-page.ts)
 export async function disclaimerAccepted(userId: string): Promise<boolean> {
 	await ensureWallet(userId);
 	const [w] = await sql`select disclaimer_at is not null as ok from money_wallets where user_id = ${userId}::bigint`;
@@ -71,12 +70,18 @@ export async function acceptDisclaimer(userId: string) {
 	await sql`update money_wallets set disclaimer_at = coalesce(disclaimer_at, now()) where user_id = ${userId}::bigint`;
 }
 
-// local, usable accounts only: money stays on this instance
+// A bare handle is local; a handle@instance resolves to a federated account.
 export async function accountFor(handle: string) {
 	const name = handle.trim().replace(/^@/, "");
-	if (!/^[A-Za-z0-9_]{1,15}$/.test(name)) return null;
-	const [u] = await sql`select id::text, screen_name, name from users
-		where lower(screen_name) = lower(${name}) and instance is null and status <> 'suspended' and deactivated_at is null`;
+	if (!/^[A-Za-z0-9_]{1,15}(?:@[a-z0-9.-]{1,253}(?::\d{1,5})?)?$/i.test(name)) return null;
+	let [u] = await sql`select id::text, screen_name, name, instance, remote_id::text from users
+		where lower(screen_name) = lower(${name}) and status <> 'suspended' and deactivated_at is null`;
+	if (!u && name.includes("@")) {
+		await import("./money-federation").then(({ discoverMoneyAccount }) => discoverMoneyAccount(name)).catch(() => undefined);
+		[u] = await sql`select id::text, screen_name, name, instance, remote_id::text from users
+			where lower(screen_name) = lower(${name}) and status <> 'suspended' and deactivated_at is null`;
+	}
+	if (u?.instance && !isPeer(u.instance)) return null;
 	return u ?? null;
 }
 
@@ -101,6 +106,7 @@ export async function sendMoney(senderId: string, handle: string, amountCents: n
 	const to = await accountFor(handle);
 	if (!to) throw new MoneyError("There's no account here with that username.");
 	if (to.id === senderId) throw new MoneyError("You can't send money to yourself.");
+	if (requestId && to.instance) throw new MoneyError("You can't pay a request from another instance yet.");
 	if (await isBlockedEitherWay(senderId, to.id)) throw new MoneyError(`You can't send money to @${to.screen_name}.`);
 	return sql.begin(async (tx) => {
 		const [done] = await tx`select id from money_transfers where sender_id = ${senderId}::bigint and idem = ${idem}`;
@@ -112,9 +118,10 @@ export async function sendMoney(senderId: string, handle: string, amountCents: n
 			if (rq.payer_id) await tx`update money_requests set status = 'paid', resolved_at = now() where id = ${requestId}::bigint`;
 		}
 		await ensureWallet(senderId, tx);
-		await ensureWallet(to.id, tx);
-		const wallets = await tx`select user_id::text, balance_cents from money_wallets
-			where user_id in (${senderId}::bigint, ${to.id}::bigint) order by user_id for update`;
+		if (!to.instance) await ensureWallet(to.id, tx);
+		const wallets = to.instance
+			? await tx`select user_id::text, balance_cents from money_wallets where user_id = ${senderId}::bigint for update`
+			: await tx`select user_id::text, balance_cents from money_wallets where user_id in (${senderId}::bigint, ${to.id}::bigint) order by user_id for update`;
 		// a second press of Send waited here for the first: it finds what that made
 		const [made] = await tx`select id from money_transfers where sender_id = ${senderId}::bigint and idem = ${idem}`;
 		if (made) return { id: String(made.id), to: to.screen_name, repeated: true };
@@ -122,9 +129,11 @@ export async function sendMoney(senderId: string, handle: string, amountCents: n
 		if (Number(mine.balance_cents) < amountCents) throw new MoneyError("You don't have enough money for that.");
 		const id = newId();
 		await tx`update money_wallets set balance_cents = balance_cents - ${amountCents} where user_id = ${senderId}::bigint`;
-		await tx`update money_wallets set balance_cents = balance_cents + ${amountCents} where user_id = ${to.id}::bigint`;
-		await tx`insert into money_transfers (id, sender_id, recipient_id, amount_cents, note, idem, request_id)
-			values (${id}::bigint, ${senderId}::bigint, ${to.id}::bigint, ${amountCents}, ${note}, ${idem}, ${requestId ?? null})`;
+		if (!to.instance) await tx`update money_wallets set balance_cents = balance_cents + ${amountCents} where user_id = ${to.id}::bigint`;
+		await tx`insert into money_transfers (id, sender_id, recipient_id, amount_cents, note, idem, request_id, federation_status)
+			values (${id}::bigint, ${senderId}::bigint, ${to.id}::bigint, ${amountCents}, ${note}, ${idem}, ${requestId ?? null}, ${to.instance ? "pending" : "complete"})`;
+		if (to.instance) await tx`insert into money_federation_outbox (transfer_id, destination, sender_id, recipient_id, amount_cents, note)
+			values (${id}::bigint, ${to.instance}, ${senderId}::bigint, ${to.remote_id}::bigint, ${amountCents}, ${note})`;
 		return { id, to: to.screen_name, repeated: false };
 	});
 }
@@ -143,6 +152,7 @@ export async function requestMoney(requesterId: string, from: string, amountText
 	if (from.trim()) {
 		payer = await accountFor(from);
 		if (!payer) throw new MoneyError("There's no account here with that username.");
+		if (payer.instance) throw new MoneyError("Money requests are only available between accounts on this instance.");
 		if (payer.id === requesterId) throw new MoneyError("You can't ask yourself for money.");
 		if (!amount) throw new MoneyError(`Say how much you're asking @${payer.screen_name} for.`);
 		if (await isBlockedEitherWay(requesterId, payer.id)) throw new MoneyError(`You can't ask @${payer.screen_name} for money.`);
@@ -175,6 +185,7 @@ export async function closeRequest(viewerId: string, id: string, action: "declin
 export async function adjust(viewer: Viewer, handle: string, cents: number) {
 	const to = await accountFor(handle);
 	if (!to) throw new MoneyError("There's no account here with that username.");
+	if (to.instance) throw new MoneyError("Only the account's home instance can adjust its balance.");
 	await ensureWallet(to.id);
 	const [w] = await sql`update money_wallets set balance_cents = greatest(balance_cents + ${cents}, 0)
 		where user_id = ${to.id}::bigint returning balance_cents`;
@@ -183,15 +194,17 @@ export async function adjust(viewer: Viewer, handle: string, cents: number) {
 }
 
 // A like on a local post earns its author money.like_cents, once per post and
-// account: unliking and liking again pays nothing more. Likes on your own posts
-// and from suspended accounts don't count.
-export async function rewardLike(likerId: string, postId: string) {
+// account, including likes relayed from a peer. Unliking and liking again pays
+// nothing more. Likes from suspended accounts don't count.
+export async function rewardLike(likerId: string, postId: string, likerInstance?: string) {
 	const cents = settings().money.like_cents;
 	if (!feature("money") || !(cents > 0)) return;
 	await sql.begin(async (tx) => {
-		const [p] = await tx`select p.user_id::text as author from posts p join users a on a.id = p.user_id
-			join users l on l.id = ${likerId}::bigint
-			where p.id = ${postId}::bigint and a.instance is null and l.instance is null and l.status <> 'suspended'`;
+		const [p] = likerInstance
+			? await tx`select p.user_id::text as author from posts p join users a on a.id = p.user_id join users l on l.id = ${likerId}::bigint
+				where p.id = ${postId}::bigint and a.instance is null and l.instance = ${likerInstance} and l.status <> 'suspended'`
+			: await tx`select p.user_id::text as author from posts p join users a on a.id = p.user_id join users l on l.id = ${likerId}::bigint
+				where p.id = ${postId}::bigint and a.instance is null and l.instance is null and l.status <> 'suspended'`;
 		if (!p || p.author === likerId) return;
 		const paid = await tx`insert into money_like_rewards (post_id, liker_id, author_id, cents) values (${postId}::bigint, ${likerId}::bigint, ${p.author}::bigint, ${cents})
 			on conflict do nothing returning 1`;
@@ -201,7 +214,7 @@ export async function rewardLike(likerId: string, postId: string) {
 	});
 }
 
-// Merchant mode (Settings > X Money): for gold organisations, payments to them
+// Merchant mode (Settings > Equicoins): for gold organisations, payments to them
 // read as purchases, with the name they choose and, if they like, their banner
 export async function merchantOf(userId: string) {
 	const [m] = await sql`select u.verified_type = 'business' as gold, m.user_id is not null as on, coalesce(m.name, '') as name, coalesce(m.show_banner, true) as show_banner
@@ -269,19 +282,19 @@ export const badges = (p: Pick<Party, "badge" | "org">) =>
 	(p.badge && BADGE_COLOR[p.badge] ? `<svg class="xm-badge" viewBox="0 0 22 22" role="img" aria-label="${BADGE_LABEL[p.badge]}"><path fill="${BADGE_COLOR[p.badge]}" d="${BADGE_PATH}"/></svg>` : "") +
 	(p.org ? `<img class="xm-org" src="${esc(p.org.avatar)}" alt="${esc(p.org.name)}" title="${esc(p.org.name)}">` : "");
 export const face = (p: Party, cls = "") => `<img class="${cls}${p.square ? " xm-sq" : ""}" src="${esc(p.avatar)}" alt="">`;
-// "with [$] Money", where X writes "with my X Card"
-export const MONEY_WORDMARK = `<span class="xm-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${MONEY_ICON}"/></svg>Money</span>`;
+// "with [$] Equicoins", where X writes "with my X Card"
+export const MONEY_WORDMARK = `<span class="xm-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${MONEY_ICON}"/></svg>Equicoins</span>`;
 
 // ---- payments
 
 // reversed: staff sent the money back (Admin > Money)
-export type Payment = { id: string; amount: number; note: string; at: Date; sender: Party; recipient: Party; reversed?: boolean };
+export type Payment = { id: string; amount: number; note: string; at: Date; sender: Party; recipient: Party; reversed?: boolean; status: string };
 
 // payments by id, with both sides; `visibleTo` keeps the ones that account is
 // part of or that one side put in a post
 export async function payments(ids: string[], visibleTo?: string): Promise<Map<string, Payment>> {
 	if (!ids.length) return new Map();
-	const rows = await sql`select t.id::text, t.amount_cents, t.note, t.created_at, t.sender_id::text, t.recipient_id::text, t.reversed_at is not null as reversed from money_transfers t
+	const rows = await sql`select t.id::text, t.amount_cents, t.note, t.created_at, t.sender_id::text, t.recipient_id::text, t.reversed_at is not null as reversed, t.federation_status from money_transfers t
 		where t.id = any(${sql.array(ids, "INT8")})
 		${
 			visibleTo
@@ -293,7 +306,7 @@ export async function payments(ids: string[], visibleTo?: string): Promise<Map<s
 	return new Map(
 		rows
 			.filter((r: any) => who.has(r.sender_id) && who.has(r.recipient_id))
-			.map((r: any) => [r.id, { id: r.id, amount: Number(r.amount_cents), note: r.note, at: new Date(r.created_at), sender: who.get(r.sender_id)!, recipient: who.get(r.recipient_id)!, reversed: r.reversed }]),
+			.map((r: any) => [r.id, { id: r.id, amount: Number(r.amount_cents), note: r.note, at: new Date(r.created_at), sender: who.get(r.sender_id)!, recipient: who.get(r.recipient_id)!, reversed: r.reversed, status: r.federation_status }]),
 	);
 }
 
@@ -415,14 +428,14 @@ export async function paymentCards(posts: { authorId: string; text: string }[]):
 			if (!t || (p.authorId !== t.sender.id && p.authorId !== t.recipient.id)) continue;
 			const mine = p.authorId === t.sender.id;
 			title = t.recipient.merchant ? `${shortCents(t.amount)} at ${t.recipient.merchant.name}` : mine ? `${shortCents(t.amount)} sent to ${t.recipient.name}` : `${shortCents(t.amount)} from ${t.sender.name}`;
-			description = t.note ? `“${t.note}”` : `${settings().instance_name} Money · ${date(t.at)}`;
+			description = t.note ? `“${t.note}”` : `${settings().instance_name} Equicoins · ${date(t.at)}`;
 			image = mine ? t.recipient.avatar : t.sender.avatar;
 			url = paymentUrl(id);
 		} else {
 			const q = asked.get(id);
 			if (!q || p.authorId !== q.requester.id) continue;
 			title = `Pay ${q.requester.merchant ? q.requester.merchant.name : `@${q.requester.screen_name}`}${q.amount ? ` ${shortCents(q.amount)}` : ""}`;
-			description = q.note || `with ${settings().instance_name} Money`;
+			description = q.note || `with ${settings().instance_name} Equicoins`;
 			image = q.requester.avatar;
 			url = requestUrl(id);
 		}
@@ -489,7 +502,7 @@ export async function recentApi(viewer: Viewer): Promise<Response> {
 
 // POST payme: the viewer's plain "Pay @name" card, made the first time
 export async function payMeApi(viewer: Viewer): Promise<Response> {
-	if (!feature("money") || viewer.actor || viewer.instance) return Response.json({ error: "X Money isn't available." }, { status: 403 });
+	if (!feature("money") || viewer.actor || viewer.instance) return Response.json({ error: "Equicoins isn't available." }, { status: 403 });
 	try {
 		return Response.json({ url: requestUrl(await requestMoney(viewer.id, "", "", "")) });
 	} catch (e) {
