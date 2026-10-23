@@ -349,7 +349,7 @@
 <body>
 <div class="app">
 	<nav id="nav">
-		<a class="logo-link" href="/home" aria-label="Back to {{instance}} home"><img class="logo" src="/public/logo-dark.png" alt="{{instance}}"></a>
+		<a href="/home" title="Back to {{instance}}"><img class="logo" src="/public/logo-dark.png" alt="{{instance}}"></a>
 	</nav>
 	<main id="main"></main>
 </div>
@@ -1000,7 +1000,8 @@ const RENDER = {
 			'<div class="field"><label>Starting balance of a new wallet ($)</label><input id="ms" inputmode="decimal" value="' + esc(dollars(m.settings.starting_cents)) + '"' + (admin ? "" : " disabled") + "></div>" +
 			'<div class="field"><label>Most one payment or request moves ($)</label><input id="mx" inputmode="decimal" value="' + esc(dollars(m.settings.max_transfer_cents)) + '"' + (admin ? "" : " disabled") + "></div>" +
 			'<div class="field"><label>Paid to a post\'s author for each like ($, 0 for none)</label><input id="ml" inputmode="decimal" value="' + esc(dollars(m.settings.like_cents)) + '"' + (admin ? "" : " disabled") + "></div>" +
-			'<p class="dim small">A new starting balance applies to wallets made from now on. Likes pay once per post and account.</p>' +
+			'<div class="field"><label>Post every payment from (@account, empty for none)</label><input id="mf" placeholder="@economy" value="' + esc(m.settings.feed ? "@" + m.settings.feed : "") + '"' + (admin ? "" : " disabled") + "></div>" +
+			'<p class="dim small">A new starting balance applies to wallets made from now on. Likes pay once per post and account. The payments feed posts each payment\'s card, without its note, from that account; reversing a payment takes its post down. People are told on the Send screen.</p>' +
 			(admin ? '<button class="btn primary" id="msave">Save</button>' : "") + "</div>" +
 			'<div class="box"><h2>Adjust a balance</h2><p class="dim small">Adds money, or takes it away with a minus (never below $0.00).</p>' +
 			'<div class="field"><label>Account</label><input id="mah" placeholder="@username"' + (admin ? "" : " disabled") + "></div>" +
@@ -1022,38 +1023,38 @@ const RENDER = {
 						(r.reversed_at ? '<span class="pill suspended">reversed</span>' : admin ? '<button class="btn danger" data-rev="' + esc(r.id) + '">Reverse</button>' : "") + "</td></tr>").join("") + "</table>"
 				: '<div class="empty">No payments' + (q ? " for @" + esc(q) : "") + ".</div>") + "</div>";
 		const again = () => this.money(main, $("#mq").value);
-		if ($("#shopOn")) $("#shopOn").onchange = () => act(() => api("saveShop", { enabled: $("#shopOn").checked }), "Shop setting saved").then(again);
-		main.querySelectorAll("[data-shop-picker]").forEach((picker) => {
-			const trigger = picker.querySelector(".shop-picker-trigger");
-			const menu = picker.querySelector(".shop-picker-menu");
-			trigger.onclick = () => { main.querySelectorAll(".shop-picker-menu").forEach((m) => { if (m !== menu) { m.hidden = true; m.previousElementSibling.setAttribute("aria-expanded", "false"); } }); menu.hidden = !menu.hidden; trigger.setAttribute("aria-expanded", String(!menu.hidden)); };
-			picker.querySelectorAll("[data-value]").forEach((option) => option.onclick = () => {
-				picker.querySelector("input[type=hidden]").value = option.dataset.value;
-				trigger.querySelector("span").textContent = option.textContent;
-				picker.querySelectorAll("[role=option]").forEach((o) => o.setAttribute("aria-selected", String(o === option)));
-				menu.hidden = true; trigger.setAttribute("aria-expanded", "false");
-				if (picker.querySelector("#shopKind")) $("#shopBadgeField").hidden = option.dataset.value !== "badge";
-			});
-		});
-		if ($("#shopCreate")) $("#shopCreate").onclick = () => act(() => api("createShopItem", { name: $("#shopName").value, description: $("#shopDesc").value, price: $("#shopPrice").value, kind: $("#shopKind").value, badgeId: $("#shopBadge").value }), "Shop item created").then(again);
-		main.querySelectorAll("[data-shop-item-review]").forEach((b) => b.onclick = async () => {
-			const approve = b.dataset.approve === "1";
-			if (!(await ask((approve ? "Approve" : "Reject") + " this shop listing?"))) return;
-			act(() => api("reviewShopItem", { id: b.dataset.shopItemReview, approve }), approve ? "Listing approved" : "Listing rejected").then(again);
-		});
-		main.querySelectorAll("[data-remote-shop-review]").forEach((b) => b.onclick = async () => {
-			const approve = b.dataset.approve === "1";
-			if (!(await ask((approve ? "Approve" : "Reject") + " this imported listing from " + b.dataset.remoteShopReview + "?"))) return;
-			act(() => api("reviewRemoteShopItem", { origin: b.dataset.remoteShopReview, id: b.dataset.id, approve }), approve ? "Imported listing approved here" : "Imported listing rejected").then(again);
-		});
-		main.querySelectorAll("[data-remote-shop-active]").forEach((b) => b.onclick = () => act(() => api("setRemoteShopItem", { origin: b.dataset.remoteShopActive, id: b.dataset.id, active: b.dataset.active !== "true" }), "Imported listing updated here").then(again));
-		main.querySelectorAll("[data-shop-active]").forEach((b) => b.onclick = () => act(() => api("setShopItem", { id: b.dataset.shopActive, active: b.dataset.active !== "true" }), "Shop item updated").then(again));
-		main.querySelectorAll("[data-shop-review]").forEach((b) => b.onclick = async () => {
-			const approve = b.dataset.approve === "1";
-			if (!(await ask((approve ? "Approve" : "Reject and refund") + " this shop request?"))) return;
-			act(() => api("reviewShopOrder", { id: b.dataset.shopReview, approve }), approve ? "Shop request approved" : "Request rejected and refunded").then(again);
-		});
-		if ($("#msave")) $("#msave").onclick = () => act(() => api("saveMoney", { starting: $("#ms").value, max_transfer: $("#mx").value, like: $("#ml").value }), "Equicoins settings saved").then(again);
+		if ($("#shopOn")) $("#shopOn").onchange = () => act(() => api("saveShop", { enabled: $("#shopOn").checked }), "Shop setting saved").then(again);
+		main.querySelectorAll("[data-shop-picker]").forEach((picker) => {
+			const trigger = picker.querySelector(".shop-picker-trigger");
+			const menu = picker.querySelector(".shop-picker-menu");
+			trigger.onclick = () => { main.querySelectorAll(".shop-picker-menu").forEach((m) => { if (m !== menu) { m.hidden = true; m.previousElementSibling.setAttribute("aria-expanded", "false"); } }); menu.hidden = !menu.hidden; trigger.setAttribute("aria-expanded", String(!menu.hidden)); };
+			picker.querySelectorAll("[data-value]").forEach((option) => option.onclick = () => {
+				picker.querySelector("input[type=hidden]").value = option.dataset.value;
+				trigger.querySelector("span").textContent = option.textContent;
+				picker.querySelectorAll("[role=option]").forEach((o) => o.setAttribute("aria-selected", String(o === option)));
+				menu.hidden = true; trigger.setAttribute("aria-expanded", "false");
+				if (picker.querySelector("#shopKind")) $("#shopBadgeField").hidden = option.dataset.value !== "badge";
+			});
+		});
+		if ($("#shopCreate")) $("#shopCreate").onclick = () => act(() => api("createShopItem", { name: $("#shopName").value, description: $("#shopDesc").value, price: $("#shopPrice").value, kind: $("#shopKind").value, badgeId: $("#shopBadge").value }), "Shop item created").then(again);
+		main.querySelectorAll("[data-shop-item-review]").forEach((b) => b.onclick = async () => {
+			const approve = b.dataset.approve === "1";
+			if (!(await ask((approve ? "Approve" : "Reject") + " this shop listing?"))) return;
+			act(() => api("reviewShopItem", { id: b.dataset.shopItemReview, approve }), approve ? "Listing approved" : "Listing rejected").then(again);
+		});
+		main.querySelectorAll("[data-remote-shop-review]").forEach((b) => b.onclick = async () => {
+			const approve = b.dataset.approve === "1";
+			if (!(await ask((approve ? "Approve" : "Reject") + " this imported listing from " + b.dataset.remoteShopReview + "?"))) return;
+			act(() => api("reviewRemoteShopItem", { origin: b.dataset.remoteShopReview, id: b.dataset.id, approve }), approve ? "Imported listing approved here" : "Imported listing rejected").then(again);
+		});
+		main.querySelectorAll("[data-remote-shop-active]").forEach((b) => b.onclick = () => act(() => api("setRemoteShopItem", { origin: b.dataset.remoteShopActive, id: b.dataset.id, active: b.dataset.active !== "true" }), "Imported listing updated here").then(again));
+		main.querySelectorAll("[data-shop-active]").forEach((b) => b.onclick = () => act(() => api("setShopItem", { id: b.dataset.shopActive, active: b.dataset.active !== "true" }), "Shop item updated").then(again));
+		main.querySelectorAll("[data-shop-review]").forEach((b) => b.onclick = async () => {
+			const approve = b.dataset.approve === "1";
+			if (!(await ask((approve ? "Approve" : "Reject and refund") + " this shop request?"))) return;
+			act(() => api("reviewShopOrder", { id: b.dataset.shopReview, approve }), approve ? "Shop request approved" : "Request rejected and refunded").then(again);
+		});
+		if ($("#msave")) $("#msave").onclick = () => act(() => api("saveMoney", { starting: $("#ms").value, max_transfer: $("#mx").value, like: $("#ml").value, feed: $("#mf").value }), "Equicoins settings saved").then(again);
 		if ($("#madj")) $("#madj").onclick = () => act(async () => { const r = await api("adjustMoney", { handle: $("#mah").value, amount: $("#maa").value }); notice("@" + r.to + " now has " + usd(r.balance)); }).then(again);
 		$("#mqs").onclick = again;
 		$("#mq").onkeydown = (e) => { if (e.key === "Enter") again(); };

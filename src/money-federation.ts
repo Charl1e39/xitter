@@ -185,6 +185,7 @@ async function pumpOnce() {
 					await tx`update money_transfers set federation_status = 'complete' where id = ${r.transfer_id}::bigint and federation_status = 'pending'`;
 					await tx`delete from money_federation_outbox where transfer_id = ${r.transfer_id}::bigint`;
 				});
+				void import("./money").then(({ announcePayment }) => announcePayment(r.transfer_id));
 			} else if (status >= 400 && status < 500 && status !== 429) {
 				await sql.begin(async (tx) => {
 					const [sent] = await tx`update money_transfers set federation_status = 'failed' where id = ${r.transfer_id}::bigint and federation_status = 'pending' returning sender_id::text, amount_cents`;
