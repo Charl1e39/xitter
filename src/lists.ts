@@ -354,17 +354,34 @@ async function discover(viewerId: string): Promise<ListRow[]> {
 		order by (select count(*) from list_subscribers s where s.list_id = l.id) desc, l.created_at desc limit 50`) as ListRow[];
 }
 
-// accounts the viewer follows who aren't on the list yet
+// accounts the viewer follows who aren't on the list yet; the Bottom cursor is
+// the offset of the next page, because the viewer can follow more than 20
 async function recommended(viewerId: string, id: string, vars: Vars) {
-	const rows = vars.cursor
-		? []
-		: await sql`select f.followee_id::text as user_id from follows f where f.follower_id = ${viewerId}::bigint
-			and f.followee_id not in (select m.user_id from list_members m join lists l on l.id = m.list_id where m.list_id = ${id}::bigint and l.owner_id = ${viewerId}::bigint)
-			and f.followee_id not in ${blockedFor(viewerId)} order by f.created_at desc limit 20`;
-	const users = await usersByIds(viewerId, rows.map((r: any) => r.user_id));
+	const cursor = typeof vars.cursor === "string" ? vars.cursor : "";
+	const match = /^b(\d{1,6})$/.exec(cursor);
+	if (cursor && !match) return { timeline: { instructions: [] } };
+	const offset = match ? Number(match[1]) : 0;
+	const pageSize = 20;
+	const rows = await sql`select f.followee_id::text as user_id from follows f where f.follower_id = ${viewerId}::bigint
+		and f.followee_id not in (select m.user_id from list_members m join lists l on l.id = m.list_id where m.list_id = ${id}::bigint and l.owner_id = ${viewerId}::bigint)
+		and f.followee_id not in ${blockedFor(viewerId)}
+		order by f.created_at desc, f.followee_id desc limit ${pageSize + 1} offset ${offset}`;
+	const page = rows.slice(0, pageSize);
+	const users = await usersByIds(viewerId, page.map((r: any) => r.user_id));
 	const base = BigInt(newId());
-	const entries = rows.flatMap((r: any, i: number) => (users.has(r.user_id) ? [userEntry(users.get(r.user_id)!, (base - BigInt(i) - 1n).toString())] : []));
-	return timeline(entries, base);
+	const entries = page.flatMap((r: any, i: number) => (users.has(r.user_id) ? [userEntry(users.get(r.user_id)!, (base - BigInt(i) - 1n).toString())] : []));
+	return {
+		timeline: {
+			instructions: [{
+				type: "TimelineAddEntries",
+				entries: [
+					...entries,
+					cursorEntry("Top", "t0", (base + 1n).toString()),
+					...(rows.length > pageSize ? [cursorEntry("Bottom", `b${offset + pageSize}`, (base - BigInt(entries.length) - 2n).toString())] : []),
+				],
+			}],
+		},
+	};
 }
 
 // Pinned lists are extra tabs on the home page. The client reads each pinned
