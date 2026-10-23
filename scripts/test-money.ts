@@ -163,6 +163,32 @@ try {
 	r = await admin(sa, "reverseTransfer", { id: revId });
 	check("an admin reverses a payment", r.status === 200 && (await balance(a)) === 1000 && (await balance(b)) === 0, r.status);
 	check("only once", (await admin(sa, "reverseTransfer", { id: revId })).status === 400);
+	// the payments feed
+	const feedName = `m${stamp}e`;
+	const feedId = await createUser(feedName, "Economy", "testpass123");
+	ids.push(feedId);
+	check("the feed must be an account here", (await admin(sa, "saveMoney", { starting: "5", max_transfer: "1000", like: "0.5", feed: "@nobody_here_x" })).status === 400);
+	check("the feed is set", (await admin(sa, "saveMoney", { starting: String(was.starting_cents / 100), max_transfer: String(was.max_transfer_cents / 100), like: String(was.like_cents / 100), feed: `@${feedName}` })).status === 200);
+	check("the Send screen says payments are public", (await sa.page("/send")).includes(`posted publicly by <a href="/${feedName}">`));
+	r = await sa.send({ to: b, amount: "2", note: "secret stuff" });
+	const fedId = new URL(r.headers.get("location")!, origin).searchParams.get("sent")!;
+	await Bun.sleep(500);
+	const [fed] = await sql`select id::text, text from posts where user_id = ${feedId}::bigint`;
+	check("each payment is posted by the feed account", fed?.text === `@${a} sent $2 to @${b}! #Money http://localhost:${process.env.PORT ?? 3000}/i/xmoney/p/${fedId}`, fed?.text);
+	const fedPost = (await sb.get("TweetDetail", { focalTweetId: fed.id })) as any;
+	const fedJson = JSON.stringify(fedPost);
+	check("its post reads as the payment over the card", fedJson.includes(`"display_text_range":[0,${`@${a} sent $2 to @${b}! #Money`.length}]`) && fedJson.includes('"name":"summary"'));
+	check("and tells both sides they were mentioned", JSON.stringify(await sb.get("NotificationsTimeline", { timeline_type: "Mentions", count: 40 })).includes(`#Money`));
+	const fedCard = (await sc.json(`money/cards?ids=p${fedId}&by=${feedName}`))[`p${fedId}`] as string;
+	check("anyone sees its card", typeof fedCard === "string");
+	check("naming both sides", fedCard?.includes("Money A") && fedCard?.includes("Money B") && fedCard?.includes("sent to"));
+	check("without the note", !fedCard?.includes("secret stuff"));
+	await admin(sa, "reverseTransfer", { id: fedId });
+	check("reversing a payment takes its feed post down", !(await sql`select 1 from posts where user_id = ${feedId}::bigint`).length);
+	await admin(sa, "saveMoney", { starting: String(was.starting_cents / 100), max_transfer: String(was.max_transfer_cents / 100), like: String(was.like_cents / 100), feed: "" });
+	r = await sa.send({ to: b, amount: "1" });
+	await Bun.sleep(300);
+	check("with no feed set nothing is posted", !(await sql`select 1 from posts where user_id = ${feedId}::bigint`).length);
 	check("and both sides see it reversed", (await sa.page(`/p/${revId}`)).includes("Reversed") && (await sb.page()).includes("Reversed"));
 	await sql`update money_wallets set balance_cents = 0 where user_id = ${ids[1]}::bigint`;
 
