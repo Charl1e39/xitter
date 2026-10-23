@@ -245,6 +245,8 @@ try {
 	await sql`insert into blocks (blocker_id, blocked_id) values (${ids[2]}::bigint, ${ids[1]}::bigint) on conflict do nothing`;
 	const forB = await (await fetch(`${origin}/account/money/people?q=${c}`, { headers: sb.headers })).json();
 	check("not accounts that blocked you", Array.isArray(forB) && !forB.some((p: any) => p.screen_name === c));
+	const bSend = await sb.page("/send");
+	check("quick picks leave out accounts that blocked you", !bSend.includes(`data-handle="${c}"`), bSend.match(/data-handle="[^"]+"/g));
 	await sql`delete from blocks where blocker_id = ${ids[2]}::bigint and blocked_id = ${ids[1]}::bigint`;
 	check("odd input lists nothing", (await people("%_")).length === 0 && (await people("")).length === 0);
 
