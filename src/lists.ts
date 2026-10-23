@@ -19,6 +19,7 @@ const MAX_NAME = 25;
 const MAX_DESCRIPTION = 100;
 const MAX_LISTS = 1000;
 const MAX_MEMBERS = 5000;
+const MEMBER_PAGE = 200;
 
 const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toString("base64");
 const slugOf = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "") || "list";
@@ -191,16 +192,33 @@ async function listsTimeline(viewerId: string, rows: ListRow[], vars: Vars) {
 
 const userOf = (viewerId: string, vars: Vars) => (isId(vars.userId) ? vars.userId : viewerId);
 
-// the accounts of a list, as user entries
+// the accounts of a list, as user entries; the Bottom cursor is the offset of
+// the next page, because a list can hold far more than one page
 async function memberTimeline(viewerId: string, table: "list_members" | "list_subscribers", id: string, vars: Vars) {
-	const rows = vars.cursor
-		? []
-		: await sql`select t.user_id::text from ${sql(table)} t where t.list_id = ${id}::bigint
-			and t.user_id not in ${blockedFor(viewerId)} and t.user_id not in ${outOfView(viewerId)} order by t.created_at desc limit 200`;
-	const users = await usersByIds(viewerId, rows.map((r: any) => r.user_id));
+	const cursor = typeof vars.cursor === "string" ? vars.cursor : "";
+	const match = /^b(\d{1,6})$/.exec(cursor);
+	if (cursor && !match) return { timeline: { instructions: [] } };
+	const offset = match ? Number(match[1]) : 0;
+	if (offset > MAX_MEMBERS) return { timeline: { instructions: [] } };
+	const rows = await sql`select t.user_id::text from ${sql(table)} t where t.list_id = ${id}::bigint
+		and t.user_id not in ${blockedFor(viewerId)} and t.user_id not in ${outOfView(viewerId)}
+		order by t.created_at desc, t.user_id desc limit ${MEMBER_PAGE + 1} offset ${offset}`;
+	const page = rows.slice(0, MEMBER_PAGE);
+	const users = await usersByIds(viewerId, page.map((r: any) => r.user_id));
 	const base = BigInt(newId());
-	const entries = rows.flatMap((r: any, i: number) => (users.has(r.user_id) ? [userEntry(users.get(r.user_id)!, (base - BigInt(i) - 1n).toString())] : []));
-	return timeline(entries, base);
+	const entries = page.flatMap((r: any, i: number) => (users.has(r.user_id) ? [userEntry(users.get(r.user_id)!, (base - BigInt(i) - 1n).toString())] : []));
+	return {
+		timeline: {
+			instructions: [{
+				type: "TimelineAddEntries",
+				entries: [
+					...entries,
+					cursorEntry("Top", "t0", (base + 1n).toString()),
+					...(rows.length > MEMBER_PAGE ? [cursorEntry("Bottom", `b${offset + MEMBER_PAGE}`, (base - BigInt(entries.length) - 2n).toString())] : []),
+				],
+			}],
+		},
+	};
 }
 
 // "b<id>" is older than, "t<id>" newer than, over feed item ids
