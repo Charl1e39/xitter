@@ -118,10 +118,12 @@
 	.security-session-meta span { color: var(--dim); font-size: 12px; }
 	.security-session-meta b { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 	.security-session-actions { display: flex; justify-content: flex-end; }
-	.archive-import-approval { display: flex; align-items: center; gap: 9px; margin: 14px 0; line-height: 1.4; cursor: pointer; }
+	.archive-import-approval { display: flex; align-items: center; gap: 9px; margin: 8px 0 4px; line-height: 1.4; cursor: pointer; }
 	.archive-import-approval input { flex: none; margin: 0; }
-	.archive-import-approval, .automod-toggle { min-height: 40px; justify-content: flex-start; text-align: left; }
-	.archive-import-actions, .automod-actions { display: flex; justify-content: flex-start; margin-top: 12px; }
+	.archive-import-approval, .automod-toggle { min-height: 28px; justify-content: flex-start; text-align: left; }
+	label.row.automod-toggle { align-items: center; }
+	label.row.automod-toggle input { margin-top: 0; }
+	.archive-import-actions, .automod-actions { display: flex; justify-content: flex-start; margin-top: 6px; }
 	.archive-import-pending { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 	.archive-import-pending h2 { margin: 0 0 8px; font-size: 15px; }
 	.federation-current pre { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -250,8 +252,10 @@
 	.invite-code-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
 	.invite-code-details > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 	.invite-code-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-	label.row { flex-wrap: nowrap; align-items: flex-start; }
-	label.row input { margin-top: 3px; flex: none; }
+	label.row { flex-wrap: nowrap; align-items: center; }
+	label.row input { margin-top: 0; flex: none; }
+	label.row:has(> input[type="checkbox"]), .card-toggle, .feature-option, .hashflag-toggle, .invite-quota-toggle { align-items: center; }
+	label.row:has(> input[type="checkbox"]) { margin-block: 0 4px !important; }
 	.schedule-controls > label.row { align-items: center; }
 	.schedule-controls > label.row input { margin-top: 0; }
 	.flags { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1660,15 +1664,16 @@ const RENDER = {
 			(admin ? '<button class="btn primary" id="saveMedia">Save</button>' : "") +
 			'<p class="dim small" id="sweepState" style="margin-top:16px">' + esc(sweepText(compression)) + "</p>" +
 			(admin ? '<button class="btn" id="compressStored">Compress stored files</button>' : "") + "</div>" +
-			'<div class="box"><h2>Daily caps</h2><p class="dim small">The most posts and replies one account may make in any 24 hours. Staff have no caps.</p>' +
-			'<label class="row" style="margin:6px 0"><input type="checkbox" id="capsOn"' + (s.daily_caps.enabled ? " checked" : "") + dis + "> Cap posts and replies per day</label>" +
-			'<div class="field"><label>Posts a day</label><input type="number" min="1" id="capPosts" value="' + esc(s.daily_caps.posts) + '"' + dis + "></div>" +
-			'<div class="field"><label>Replies a day</label><input type="number" min="1" id="capReplies" value="' + esc(s.daily_caps.replies) + '"' + dis + "></div>" +
-			(admin ? '<button class="btn primary" id="saveCaps">Save</button>' : "") + "</div></div><div class=\"settings-column\">" +
+			"</div><div class=\"settings-column\">" +
 			'<div class="box"><h2>Rate limits</h2><p class="dim small">Requests per account per 15 minutes. Staff have no limits. Hitting one shows the app\'s "try again later" and a line in the server log.</p>' +
 			[["read", "Any request (a page load is about 30)"], ["endpoint", "Any one kind of request (a stuck page loses only that)"], ["write", "Other changes (settings, deletes, lists…)"], ["post", "Posts and replies"], ["engage", "Likes, reposts, bookmarks, follows"], ["dm", "Messages sent"], ["upload", "Files uploaded"]]
 				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" min="1" data-rate="' + k + '" value="' + esc(s.rate_limits[k]) + '"' + dis + "></div>").join("") +
-			(admin ? '<button class="btn primary" id="saveRates">Save</button>' : "") + "</div></div><div class=\"settings-column\">" +
+			(admin ? '<button class="btn primary" id="saveRates">Save rate limits</button>' : "") +
+			'<h3 style="margin:20px 0 8px;padding-top:16px;border-top:1px solid var(--line);font-size:15px">Daily caps</h3><p class="dim small">The most posts and replies one account may make in any 24 hours. Staff have no caps.</p>' +
+			'<label class="row" style="margin:6px 0"><input type="checkbox" id="capsOn"' + (s.daily_caps.enabled ? " checked" : "") + dis + "> Cap posts and replies per day</label>" +
+			'<div class="field"><label>Posts a day</label><input type="number" min="1" id="capPosts" value="' + esc(s.daily_caps.posts) + '"' + dis + "></div>" +
+			'<div class="field"><label>Replies a day</label><input type="number" min="1" id="capReplies" value="' + esc(s.daily_caps.replies) + '"' + dis + "></div>" +
+			(admin ? '<button class="btn primary" id="saveCaps">Save daily caps</button>' : "") + "</div></div><div class=\"settings-column\">" +
 			'<div class="box"><h2>Post length</h2><p class="dim small">The longest post each badge may write, counted like X counts (links 23, Chinese, Japanese, Korean and emoji 2). Past 280 a post shows a preview with "Show more". Changes reach the composer on its next page load.</p>' +
 			[["none", "No badge"], ["blue", "Blue check"], ["business", "Gold check (organisations)"], ["government", "Grey check (government organisations and officials)"]]
 				.map(([k, l]) => '<div class="field"><label>' + l + '</label><input type="number" min="1" data-postlen="' + k + '" value="' + esc(s.post_limits[k]) + '"' + dis + "></div>").join("") +
