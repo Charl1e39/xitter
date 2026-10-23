@@ -256,6 +256,8 @@ try {
 	await sql`update users set status = 'restricted' where id = ${ids[2]}::bigint`;
 	const refused = await sc.form("/account/money/request", { from: a, amount: "1", note: "" });
 	check("a restricted account can't ask for money", refused.status === 400 && (await refused.text()).includes("can't ask for money"));
+	const payMeRefused = await fetch(`${origin}/i/api/xitter/money/payme`, { method: "POST", headers: { ...sc.headers, "x-csrf-token": csrfOf(sc) } });
+	check("and its Pay button gets a clean refusal", payMeRefused.status === 403 && (await payMeRefused.text()).includes("can't ask for money"), payMeRefused.status);
 	await sql`update users set status = 'active' where id = ${ids[2]}::bigint`;
 	await sql`update users set role = 'moderator' where id = ${ids[1]}::bigint`;
 	const modView = await (await admin(sb, "money")).json();
