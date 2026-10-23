@@ -22,6 +22,7 @@ import { createInvite, staffHandleProblem } from "./invites";
 import { forgetHeld, handleHeld, retireAccount } from "./held";
 import { activeStrikes, shutOut } from "./moderation";
 import { REASONS } from "./reports";
+import { startSweep, sweepState } from "./media-compress";
 import { FEATURES, type Feature, type SignupMode, allSettings, setSetting, settings } from "./settings";
 import { SLOTS, brandingState, resetBranding, saveBranding } from "./branding";
 import { createPlatform, renameWebSource } from "./platforms";
@@ -37,7 +38,7 @@ import { switchActions } from "./feature-switches";
 import { moneyActions } from "./money-admin";
 import { AFFILIATION_LIMIT } from "./org-manage";
 import { staffGate } from "./staff-access";
-import { countryCode, countryName } from "./countries";
+import { countryCode, countryDisplayName } from "./countries";
 import { GRANTABLE, PERMISSIONS, RANK, type Role, allows, mayRun, permissionOf, rolePermissions } from "./staff-permissions";
 
 export class AdminError extends Error {
@@ -379,7 +380,7 @@ const ACTIONS: Record<string, Action> = {
 		role: "support",
 		run: async (a, b) => {
 			const id = idOf(b.id);
-			const [u] = await sql`select ${userListCols}, ${allows(a.role, "invites") ? sql`u.invite_code` : sql`null::text as invite_code`}, u.bio, u.location, u.website, u.based_in_override, u.country, u.signup_country, u.count_overrides, u.decor, u.notes_writer, u.never_sensitive, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text, u.instance,
+			const [u] = await sql`select ${userListCols}, ${allows(a.role, "invites") ? sql`u.invite_code` : sql`null::text as invite_code`}, u.bio, u.location, u.website, u.banner_url, u.based_in_override, u.country, u.signup_country, u.count_overrides, u.decor, u.notes_writer, u.never_sensitive, u.org_badge_id::text, u.status_until, u.parody_label, u.label_id::text, u.instance,
 				(select coalesce(json_agg(ub.badge_id::text order by ub.position), '[]') from user_badges ub where ub.user_id = u.id) as badge_ids,
 				(select count(*)::int from sessions s where s.user_id = u.id) as sessions,
 				(select count(*)::int from api_tokens t where t.user_id = u.id) as api_tokens,
@@ -397,7 +398,7 @@ const ACTIONS: Record<string, Action> = {
 				join login_events other on other.ip = mine.ip and other.user_id <> mine.user_id and other.created_at > now() - interval '90 days'
 				join users u on u.id = other.user_id
 				where mine.user_id = ${id}::bigint and mine.ip is not null and mine.created_at > now() - interval '90 days' limit 20`;
-			u.joined_from = u.signup_country ? (countryName(u.signup_country) ?? u.signup_country) : "";
+			u.joined_from = u.signup_country ? countryDisplayName(u.signup_country) : "";
 			return { user: u, invited, log, alts, strikes, next_step: ladder.length ? ladder[Math.min(strikes + 1, ladder.length) - 1] : 0 };
 		},
 	},
@@ -426,9 +427,8 @@ const ACTIONS: Record<string, Action> = {
 			// the country after the date joined in About this account; blank hides it
 			if (typeof b.joined_from === "string") {
 				const value = b.joined_from.trim();
-				const code = value ? countryCode(value) : null;
-				if (code === undefined) throw new AdminError("Joined from takes a country name or its two-letter code, like SE.");
-				changes.signup_country = code;
+				if ([...value].length > 60) throw new AdminError("Joined from is at most 60 characters.");
+				changes.signup_country = value ? countryCode(value) ?? value : null;
 			}
 			if (!Object.keys(changes).length) return {};
 			if (changes.screen_name) {
@@ -752,8 +752,19 @@ const ACTIONS: Record<string, Action> = {
 
 	settings: {
 		role: "support",
-		run: async () => ({ settings: await allSettings(), features: FEATURES, branding: brandingState(), slots: SLOTS }),
+		run: async () => ({ settings: await allSettings(), features: FEATURES, branding: brandingState(), slots: SLOTS, compression: sweepState() }),
 	},
+
+	// Settings > Media: files stored before compression was on (media-compress.ts)
+	compressStored: {
+		role: "admin",
+		run: async (a) => {
+			if (!settings().media.compress) throw new AdminError("Switch compression on and save first.");
+			if (startSweep()) await audit(a, "compress_stored", null);
+			return { compression: sweepState() };
+		},
+	},
+	compressionState: { role: "support", run: async () => ({ compression: sweepState() }) },
 
 	saveSettings: {
 		role: "admin",
@@ -787,6 +798,21 @@ const ACTIONS: Record<string, Action> = {
 					video_seconds: n(b.limits.video_seconds, 5, 7200, "Video length"),
 				});
 				changed.push("limits");
+			}
+			if (b.media && typeof b.media === "object") {
+				const n = (v: unknown, lo: number, hi: number, what: string) => {
+					const x = Number(v);
+					if (!Number.isInteger(x) || x < lo || x > hi) throw new AdminError(`${what} must be a whole number from ${lo} to ${hi}.`);
+					return x;
+				};
+				await setSetting("media", {
+					compress: !!b.media.compress,
+					photo_max_side: [680, 900, 1200, 2048, 4096].includes(Number(b.media.photo_max_side)) ? Number(b.media.photo_max_side) : n(b.media.photo_max_side, 680, 4096, "Photo size"),
+					photo_quality: n(b.media.photo_quality, 30, 100, "Photo quality"),
+					video_max_side: n(b.media.video_max_side, 240, 1920, "Video size"),
+					video_crf: n(b.media.video_crf, 18, 40, "Video quality"),
+				});
+				changed.push("media");
 			}
 			if (b.rate_limits && typeof b.rate_limits === "object") {
 				const next = { ...s.rate_limits };
