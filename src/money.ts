@@ -490,5 +490,10 @@ export async function recentApi(viewer: Viewer): Promise<Response> {
 // POST payme: the viewer's plain "Pay @name" card, made the first time
 export async function payMeApi(viewer: Viewer): Promise<Response> {
 	if (!feature("money") || viewer.actor || viewer.instance) return Response.json({ error: "X Money isn't available." }, { status: 403 });
-	return Response.json({ url: requestUrl(await requestMoney(viewer.id, "", "", "")) });
+	try {
+		return Response.json({ url: requestUrl(await requestMoney(viewer.id, "", "", "")) });
+	} catch (e) {
+		if (e instanceof MoneyError) return Response.json({ error: e.message }, { status: 403 });
+		throw e;
+	}
 }
