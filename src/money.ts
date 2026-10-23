@@ -470,10 +470,10 @@ export async function paymentCards(posts: { authorId: string; text: string }[]):
 			const byFeed = p.authorId === feed?.id;
 			if (!t || (p.authorId !== t.sender.id && p.authorId !== t.recipient.id && !byFeed)) continue;
 			const mine = p.authorId === t.sender.id;
-			title = byFeed
-				? `${t.sender.name} sent ${shortCents(t.amount)} to ${t.recipient.merchant?.name ?? t.recipient.name}`
-				: t.recipient.merchant ? `${shortCents(t.amount)} at ${t.recipient.merchant.name}` : mine ? `${shortCents(t.amount)} sent to ${t.recipient.name}` : `${shortCents(t.amount)} from ${t.sender.name}`;
-			description = t.note && !byFeed ? `“${t.note}”` : `${settings().instance_name} Equicoins · ${date(t.at)}`;
+			title = byFeed
+				? `${t.sender.name} sent ${shortCents(t.amount)} to ${t.recipient.merchant?.name ?? t.recipient.name}`
+				: t.recipient.merchant ? `${shortCents(t.amount)} at ${t.recipient.merchant.name}` : mine ? `${shortCents(t.amount)} sent to ${t.recipient.name}` : `${shortCents(t.amount)} from ${t.sender.name}`;
+			description = t.note && !byFeed ? `“${t.note}”` : `${settings().instance_name} Equicoins · ${date(t.at)}`;
 			image = mine ? t.recipient.avatar : t.sender.avatar;
 			url = paymentUrl(id);
 		} else {
