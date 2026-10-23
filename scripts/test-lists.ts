@@ -11,6 +11,10 @@ const origin = `http://localhost:${process.env.PORT ?? 3000}`;
 const [nameA, nameB, password] = process.argv.slice(2);
 if (!nameA || !nameB || !password) throw new Error("usage: bun scripts/test-lists.ts <user A> <user B> <password>");
 
+// The built-in All list needs an instance admin; the CI database has none.
+const adminTag = Date.now().toString(36);
+await sql`insert into users (id, screen_name, name, password_hash, role) values (${newId()}::bigint, ${`${adminTag}admin`}, 'List admin fixture', 'x', 'admin')`;
+
 async function session(username: string) {
 	const r = await fetch(`${origin}/login`, { method: "POST", body: new URLSearchParams({ username, password }), redirect: "manual" });
 	const cookies = r.headers.getSetCookie().map((c) => c.split(";")[0]);
@@ -140,6 +144,7 @@ check("deleted list is gone", !!gone.errors?.length);
 for (const p of [post]) await b.gql("DeleteTweet", { tweet_id: p });
 await a.gql("DeleteTweet", { tweet_id: other });
 for (const m of made) await a.gql("DeleteList", { listId: m });
+await sql`delete from users where screen_name = ${`${adminTag}admin`}`;
 
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
