@@ -1,6 +1,6 @@
 {
 	"version": 1,
-	"sequence": 19,
+	"sequence": 20,
 	"instances": [
 		{
 			"id": "a.aagaming.me",
@@ -49,6 +49,13 @@
 			"name": "social.pixelatedaria.space",
 			"source_url": "https://github.com/xittered/xitter",
 			"public_key": "yTE4xnSExcGTOgq_JAhElkvce0vif-MxTZefmy-8IeY",
+			"state": "active"
+		},
+		{
+			"id": "twitter.meowing.zip",
+			"name": "NOT Twitter",
+			"source_url": "https://github.com/10kbcat/xitter",
+			"public_key": "umKV5puos6jxSWboWpvR3vgXcvVB-1EAx7U-nSFAW8E",
 			"state": "active"
 		},
 		{
