@@ -46,6 +46,9 @@ const ALWAYS = [
 	// the signed-out home page's footer keeps Terms and Privacy (our rules page)
 	'nav[aria-label="Footer"] > div:has(> a[href^="http"]:not([href$="/tos"]):not([href$="/privacy"]))',
 	'nav[aria-label="Footer"] > div:has(> a[href^="/i/jf/stories"])',
+	// a menu's divider with nothing after it (the More menu ends with one, the
+	// entries it led to being gone)
+	'[role="menu"] [data-testid="Dropdown"] div:has(> [role="separator"]):last-child',
 ];
 
 export function hideCss(): string {
