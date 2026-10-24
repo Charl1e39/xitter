@@ -274,7 +274,13 @@
 	label.row:has(> input[type="checkbox"]) { margin-block: 0 4px !important; }
 	.schedule-controls > label.row { align-items: center; }
 	.schedule-controls > label.row input { margin-top: 0; }
-	.flags { display: flex; flex-wrap: wrap; gap: 6px; }
+	.flags { display: flex; flex-wrap: wrap; gap: 6px; max-height: 210px; overflow-y: auto; padding: 8px 8px 0 0; }
+	.flags::-webkit-scrollbar { width: 6px; }
+	.flags::-webkit-scrollbar-track { background: transparent; }
+	.flags::-webkit-scrollbar-thumb { background: #536471; border-radius: 999px; }
+	.flags::-webkit-scrollbar-thumb:hover { background: var(--blue); }
+	/* Chrome drops the ::-webkit-scrollbar look once scrollbar-color is set */
+	@supports not selector(::-webkit-scrollbar) { .flags { scrollbar-width: thin; scrollbar-color: #536471 transparent; } }
 	.flags button { width: 34px; height: 34px; padding: 0; border: 2px solid var(--line); border-radius: 6px; background: none; color: var(--dim); font-size: 11px; cursor: pointer; display: grid; place-items: center; }
 	.flags button img { width: 20px; height: 20px; border-radius: 3px; }
 	.flags button.on { border-color: var(--blue); }
@@ -435,7 +441,7 @@ function browser(ua) {
 }
 const avatar = (u) => u.avatar_url ? (u.avatar_url.startsWith("/") ? u.avatar_url : u.avatar_url) : "/abs/sticky/default_profile_images/default_profile_normal.png";
 const badge = (u) => u.verified_type ? '<span class="badge ' + esc(u.verified_type) + '" title="' + esc(u.verified_type) + '"></span>' : "";
-const flagImg = (u) => u.flag ? u.flag.split(",").filter((f) => /^[a-z]+$/.test(f)).slice(0, 4).map((f) => '<img class="flag" alt="' + esc(f) + '" src="/public/flag-' + esc(f) + '.svg">').join(" ") : "";
+const flagImg = (u) => u.flag ? u.flag.split(",").filter((f) => /^[a-z]+(-[a-z]{2})?$/.test(f)).slice(0, 4).map((f) => '<img class="flag" alt="' + esc(f) + '" src="/public/flag-' + esc(f) + '.svg">').join(" ") : "";
 const standing = (u) => (u.status && u.status !== "active" ? ' <span class="pill ' + esc(u.status) + '">' + esc(u.status) + "</span>" : "") + (u.role ? ' <span class="pill staff">' + esc(u.role) + "</span>" : "");
 const person = (u) => '<div class="person"><img class="avatar" alt="" src="' + esc(avatar(u)) + '"><div class="names"><div><b>' + esc(u.name) + "</b> " + badge(u) + " " + flagImg(u) + '</div><div class="dim small">@' + esc(u.screen_name) + standing(u) + "</div></div></div>";
 
@@ -2173,9 +2179,9 @@ async function renderUser(main, id) {
 		[["", "none"], ["translator", "blue (translator)"], ["moderator", "gold (translator moderator)"], ["approver", "yellow (approver)"]].map(([v, l]) => '<option value="' + v + '"' + ((u.translator ?? "") === v ? " selected" : "") + ">" + l + "</option>").join("") +
 		'</select></div><div class="field"><label>Profile label (under the name, where X shows "Parody account"; <a href="#badges">make one</a>)</label><select id="plabel"' + (can("setProfileLabel") ? "" : " disabled") + ">" +
 		[["None", "none"], ["Parody", "Parody account"], ["Commentary", "Commentary account"], ["Fan", "Fan account"]].concat(labels.map((l) => [l.id, l.text])).map(([v, l]) => '<option value="' + esc(v) + '"' + ((u.label_id || u.parody_label || "None") === v ? " selected" : "") + ">" + esc(l) + "</option>").join("") +
-		'</select></div><div class="field"><label>Pride flags, up to 4, in the order they show</label><div class="flags" id="flags">' +
+		'</select></div><div class="field"><label>Flags, up to 4, in the order they show</label><div class="flags" id="flags">' +
 		[{ id: "", name: "none" }].concat(flags).map((f) => '<button type="button" title="' + esc(f.name) + '" data-flag="' + esc(f.id) + '"' + (can("setFlag") ? "" : " disabled") + ">" +
-			(f.id ? '<img alt="" src="/public/flag-' + esc(f.id) + '.svg">' : "none") + "</button>").join("") + "</div>" +
+			(f.id ? '<img alt="" loading="lazy" src="/public/flag-' + esc(f.id) + '.svg">' : "none") + "</button>").join("") + "</div>" +
 		(can("setFlag") ? '<div class="row" style="margin-top:8px"><button class="btn primary" id="saveFlags" disabled>Save flags</button><span class="dim small" id="flagState"></span></div>' : '<p class="dim small">Requires permission to set flags.</p>') + "</div>" +
 		(u.decor ? '<div class="field"><label>Profile decor from Steam</label><div class="dim small">' +
 			esc([u.decor.profile && "game profile " + u.decor.profile.name, u.decor.theme && "theme " + u.decor.theme, u.decor.background && "background " + u.decor.background.name, u.decor.frame && "frame " + u.decor.frame.name].filter(Boolean).join(" · ")) +
