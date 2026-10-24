@@ -19,7 +19,7 @@ import { memberInvitesRoute } from "./member-invites";
 import { orgRoute } from "./org-manage";
 import { menuLinks } from "./tidy";
 import { isPlayerPage, playerPage } from "./player-card";
-import { chatMediaRoute, chatSocket, juiceboxProxy, restrictedChatOperation, socketUser } from "./chat";
+import { chatMediaRoute, chatSocket, juiceboxProxy, socketUser } from "./chat";
 import { loadBuild } from "./build";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
@@ -73,7 +73,7 @@ import { forgetRanking } from "./ranking";
 import { cardsApi, payMeApi, recentApi } from "./money";
 import { merchantRoute, moneyRoute } from "./money-page";
 import { expireShopCheckmarks } from "./money-shop";
-import { restrictedPage } from "./restricted-page";
+import { restrictedPage, restrictedRefuses } from "./restricted-page";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -235,8 +235,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 		if (!delegateMay(acting.actor!.role, req.method, path, operation)) return apiError(403, 200, "Delegates can't do this for the account.");
 		viewer = acting;
 	}
-	const restrictedAllowed = restrictedChatOperation(operation) || path === "/xitter/money/payme";
-	if (viewer.status === "restricted" && (req.method !== "GET" || (operation && isMutation(operation))) && !restrictedAllowed)
+	if (viewer.status === "restricted" && restrictedRefuses(req.method, path, operation, url))
 		return apiError(403, 326, "Your account can't interact right now.");
 	// a follow, block, mute or like changes what "For you" would rank
 	if (req.method !== "GET") forgetRanking(viewer.id);

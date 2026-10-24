@@ -1,12 +1,22 @@
 import type { Viewer } from "./auth";
 import { accountPage, esc } from "./account-page";
 import { sql } from "./db";
+import { knownChatOperation } from "./chat";
+import { bucketsFor } from "./ratelimit";
+
+// A restricted account still reads, blocks and mutes, and keeps its direct
+// messages (chat.ts lets it write to people who follow it). The client's
+// background calls (ratelimit.ts BACKGROUND) aren't in any bucket, so they go
+// through too; what posts, engages or writes is refused.
+const KEPT = /^\/(1\.1\/(blocks|mutes\/(users|keywords))\/|xitter\/money\/payme$)/;
+export const restrictedRefuses = (method: string, path: string, operation: string | undefined, url: URL) =>
+	!KEPT.test(path) && !(operation && knownChatOperation(operation)) && bucketsFor(method, path, operation, url).some((b) => b === "post" || b === "engage" || b === "write");
 
 export const restrictedReason = (message?: string | null, sanction?: string | null) =>
-	message ?? sanction ?? "The instance team has restricted this account.";
+	message || sanction || "The instance team has restricted this account.";
 
 export const restrictedBody = (reason: string) => `<h1>Your account is restricted</h1>
-	<p>You can still read Xitter, but you can't interact with posts, send messages, or change account data while this restriction is active.</p>
+	<p>You can still read Xitter, but you can't interact with posts, message people who don't follow you, or change account data while this restriction is active.</p>
 	<div class="card strike"><strong>Reason</strong><p>${esc(reason)}</p></div>
 	<p>If you think this restriction was made in error, <a href="/appeal">submit an appeal</a>. Include any context that may help the instance team review the decision.</p>`;
 

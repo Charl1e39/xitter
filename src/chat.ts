@@ -940,8 +940,6 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 };
 
 export const knownChatOperation = (name: string) => name in chatHandlers;
-export const restrictedChatOperation = (name: string | undefined) =>
-	name === "SendMessageCreateMutation" || name === "SendMessageEventMutation";
 
 // the browser's way to the Juicebox realm
 export async function juiceboxProxy(req: Request, path: string): Promise<Response> {
