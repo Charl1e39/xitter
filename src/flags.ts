@@ -1,7 +1,10 @@
 // Flags people can pick at sign-up; they show next to the name, in the place X
 // puts an affiliate's organisation badge, served as /public/flag-<id>.svg.
 // Pride flags are drawn here, square so they read at badge size. Country flags
-// are Twemoji's (CC-BY 4.0, by Twitter), the client's own emoji images.
+// are Twemoji's (CC-BY 4.0, by Twitter), the client's own emoji images,
+// saved in public/flags.
+
+import { join } from "node:path";
 
 type Flag = { name: string; stripes?: string[]; extra?: string; country?: string };
 
@@ -51,24 +54,12 @@ export const flagList = (v: unknown): string[] => (typeof v === "string" ? [...n
 export const flagValue = (v: unknown): string | null => flagList(v).join(",") || null;
 export const unknownFlag = (v: unknown) => typeof v === "string" && v.split(",").some((f) => f.trim() && !isFlag(f.trim()));
 
-// a country's emoji image, fetched once (a failed fetch is tried again later)
-const TWEMOJI = "https://abs-0.twimg.com/emoji/v2/svg/";
-const fetched = new Map<string, Promise<string | undefined>>();
-function countrySvg(code: string): Promise<string | undefined> {
-	let svg = fetched.get(code);
-	if (!svg) {
-		const name = [...code].map((c) => (0x1f1e6 + c.charCodeAt(0) - 65).toString(16)).join("-");
-		svg = fetch(`${TWEMOJI}${name}.svg`, { signal: AbortSignal.timeout(10_000) })
-			.then(async (r) => {
-				const text = r.ok ? await r.text() : "";
-				return text.startsWith("<svg") ? text : undefined;
-			})
-			.catch(() => undefined);
-		fetched.set(code, svg);
-		svg.then((s) => s || fetched.delete(code));
-	}
-	return svg;
-}
+// a country's emoji image, kept in public/flags/<code>.svg
+const FLAG_DIR = join(import.meta.dir, "..", "public", "flags");
+const countrySvg = async (code: string): Promise<string | undefined> => {
+	const file = Bun.file(join(FLAG_DIR, `${code.toLowerCase()}.svg`));
+	return (await file.exists()) ? file.text() : undefined;
+};
 
 export async function flagSvg(id: string): Promise<string | undefined> {
 	const f = FLAGS[id];

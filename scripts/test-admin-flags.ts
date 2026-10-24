@@ -35,6 +35,12 @@ test("country flags sit beside the pride flags without taking their ids", async 
 	expect(await flagSvg("country-zz")).toBeUndefined();
 });
 
+test("every country flag is saved in public/flags", async () => {
+	const countries = Object.keys(FLAGS).filter((id) => id.startsWith("country-"));
+	const svgs = await Promise.all(countries.map((id) => flagSvg(id)));
+	expect(countries.filter((id, i) => !svgs[i]?.startsWith("<svg"))).toEqual([]);
+});
+
 test("admin lists render country flag images", async () => {
 	const source = await Bun.file(new URL("../src/admin.html", import.meta.url)).text();
 	const line = source.split("\n").find((line) => line.startsWith("const flagImg = "))!;

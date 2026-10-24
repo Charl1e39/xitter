@@ -111,7 +111,7 @@ async function servePublic(p: string): Promise<Response> {
 	const flag = /^flag-([a-z]+(?:-[a-z]{2})?)\.svg$/.exec(name);
 	if (flag) {
 		const svg = await flagSvg(flag[1]);
-		// a country's image comes from elsewhere: opened on its own, it may not run anything here
+		// a country's image is Twemoji's file: opened on its own, it may not run anything here
 		return svg
 			? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'", "x-content-type-options": "nosniff" } })
 			: new Response("not found", { status: 404 });
