@@ -231,7 +231,8 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 		if (!delegateMay(acting.actor!.role, req.method, path, operation)) return apiError(403, 200, "Delegates can't do this for the account.");
 		viewer = acting;
 	}
-	if (viewer.status === "restricted" && (req.method !== "GET" || (operation && isMutation(operation))) && !restrictedChatOperation(operation))
+	const restrictedAllowed = restrictedChatOperation(operation) || path === "/xitter/money/payme";
+	if (viewer.status === "restricted" && (req.method !== "GET" || (operation && isMutation(operation))) && !restrictedAllowed)
 		return apiError(403, 326, "Your account can't interact right now.");
 	// a follow, block, mute or like changes what "For you" would rank
 	if (req.method !== "GET") forgetRanking(viewer.id);
