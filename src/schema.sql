@@ -1820,3 +1820,15 @@ end $$;
 drop trigger if exists users_reply_country_catalog on users;
 create trigger users_reply_country_catalog after insert or delete or update of country, based_in_override on users
 	for each row execute function update_reply_country_catalog();
+
+-- Circles (circles.ts): the people who see an account's Circle posts, and on
+-- each post in a Circle (replies too), whose Circle it is
+create table if not exists circle_members (
+	owner_id bigint not null references users (id) on delete cascade,
+	member_id bigint not null references users (id) on delete cascade,
+	created_at timestamptz not null default now(),
+	primary key (owner_id, member_id)
+);
+create index if not exists circle_members_member_idx on circle_members (member_id);
+alter table posts add column if not exists circle_owner_id bigint references users (id) on delete cascade;
+create index if not exists posts_circle_owner_idx on posts (circle_owner_id) where circle_owner_id is not null;

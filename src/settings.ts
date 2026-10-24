@@ -28,6 +28,7 @@ export const FEATURES = {
 	link_previews: "Previews of public posts and profiles when their links are shared in other apps",
 	archive_import: "Import from X: accounts upload their X archive and its posts come over (Settings > Your account)",
 	money: "Equicoins: accounts send each other money from the side bar (the instance's own play money, not real currency)",
+	circles: "Circles: posts only the people an account picks can see (Circle instead of Everyone in the composer)",
 } as const;
 export type Feature = keyof typeof FEATURES;
 
@@ -53,6 +54,7 @@ const DEFAULTS = {
 		link_previews: true,
 		archive_import: false,
 		money: false,
+		circles: true,
 	} as Record<Feature, boolean>,
 	limits: { image_mb: 5, video_mb: Number(process.env.MAX_VIDEO_MB ?? 200), video_seconds: Number(process.env.MAX_VIDEO_SECONDS ?? 600) },
 	// media-compress.ts and video.ts: uploads made smaller as they're stored, for
