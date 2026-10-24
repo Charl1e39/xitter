@@ -96,6 +96,7 @@ export async function accountSettingsRoute(method: string, path: string, viewer:
 			// Other devices have to sign in again with the new password.
 			await tx`delete from sessions where user_id = ${viewer.id}::bigint and token <> ${viewer.token}`;
 			await tx`delete from api_tokens where user_id = ${viewer.id}::bigint`;
+			await tx`delete from oauth_codes where user_id = ${viewer.id}::bigint`;
 			await tx`delete from login_challenges where user_id = ${viewer.id}::bigint`;
 			// a passkey someone else added mustn't outlast the new password
 			await tx`delete from passkeys where user_id = ${viewer.id}::bigint`;

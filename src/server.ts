@@ -445,7 +445,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (steam) return steamFile(req, steam[1]!, steam[2]!, url.searchParams.has("thumb"), !!viewer);
 	if (viewer?.role && !(await staffGate(req, viewer))) markStaff();
 	// a suspended account can't sign in, so it appeals here with its password
-	if (p === "/appeal") return appealRoute(req, server.requestIP(req)?.address ?? "");
+	if (p === "/appeal") return appealRoute(req, requestIp(req) ?? "");
 	// maintenance: staff carry on, everyone else signed in waits
 	if (viewer && !viewer.role && settings().operations.maintenance) {
 		if (API_PREFIX.test(p) || req.method !== "GET") return apiError(503, 130, settings().operations.message);

@@ -70,6 +70,13 @@ export type MediaRow = {
 
 export type Image = { mime: string; width: number; height: number };
 
+// The only types media goes out as. A file stored under any other (a peer
+// claiming image/svg+xml for a script) is sent as bytes, and none of it may run
+// anything when opened on its own.
+const SERVED_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4"]);
+export const servedType = (mime: string) => (SERVED_TYPES.has(mime) ? mime : "application/octet-stream");
+export const MEDIA_CSP = "default-src 'none'; sandbox";
+
 // type and dimensions from the file header; nothing else is trusted
 export function sniffImage(b: Buffer): Image | undefined {
 	if (b.length >= 24 && b.readUInt32BE(0) === 0x89504e47) return { mime: "image/png", width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
@@ -686,7 +693,7 @@ export async function serveMedia(req: Request, pathname: string, viewer: Viewer)
 		const served = body && (await servedOf(poster[1]));
 		const cache = served && (await cacheFor(viewer, served));
 		if (!body || !cache) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
-		const headers: Record<string, string> = { "content-type": "image/jpeg", "cache-control": cache, "x-content-type-options": "nosniff", ...tagOf(served, body, cache) };
+		const headers: Record<string, string> = { "content-type": "image/jpeg", "cache-control": cache, "x-content-type-options": "nosniff", "content-security-policy": MEDIA_CSP, ...tagOf(served, body, cache) };
 		if (unchanged(req, headers)) return new Response(null, { status: 304, headers });
 		return new Response(body, { headers });
 	}
@@ -696,7 +703,7 @@ export async function serveMedia(req: Request, pathname: string, viewer: Viewer)
 	const served = await servedOf(m[1]);
 	const cache = served && (await cacheFor(viewer, served));
 	if (!served || !cache) return new Response("not found", { status: 404, headers: { "cache-control": PRIVATE } });
-	const headers: Record<string, string> = { "content-type": served.mime, "cache-control": cache, "x-content-type-options": "nosniff", "accept-ranges": "bytes", ...tagOf(served, body, cache) };
+	const headers: Record<string, string> = { "content-type": servedType(served.mime), "cache-control": cache, "x-content-type-options": "nosniff", "content-security-policy": MEDIA_CSP, "accept-ranges": "bytes", ...tagOf(served, body, cache) };
 	if (unchanged(req, headers)) return new Response(null, { status: 304, headers });
 	const size = body.size;
 	const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");

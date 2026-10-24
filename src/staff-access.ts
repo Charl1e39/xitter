@@ -60,5 +60,8 @@ export const markStaff = () => {
 	if (request) request.staff = true;
 };
 
+// whether this request passed staffGate (the admin panel's address and 2FA rules)
+export const isStaffRequest = () => !!staffRequest.getStore()?.staff;
+
 export const staffViewer = (viewerId: string) =>
 	staffRequest.getStore()?.staff ? sql`exists (select 1 from users staff where staff.id = ${viewerId}::bigint and staff.role is not null)` : sql`false`;
