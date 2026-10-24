@@ -31,13 +31,6 @@
 			"state": "active"
 		},
 		{
-			"id": "social.pixelatedaria.space",
-			"name": "social.pixelatedaria.space",
-			"source_url": "https://github.com/xittered/xitter",
-			"public_key": "Y0cHJS-cafemUL2VtqitM9IaETXLYAzy54c1drovxPk",
-			"state": "active"
-		},
-		{
 			"id": "testing.xitter.space",
 			"name": "Xitter Testing",
 			"source_url": "https://github.com/Xittered/xitter",
@@ -77,6 +70,13 @@
 			"name": "X12",
 			"source_url": null,
 			"public_key": "BxDn6ty57Wbfp6R8fEk8cGxO8ucUDNfGDiDanyIvUs8",
+			"state": "active"
+		},
+		{
+			"id": "xit.pixelatedaria.space",
+			"name": "xit",
+			"source_url": "https://github.com/xittered/xitter",
+			"public_key": "Y0cHJS-cafemUL2VtqitM9IaETXLYAzy54c1drovxPk",
 			"state": "active"
 		},
 		{
