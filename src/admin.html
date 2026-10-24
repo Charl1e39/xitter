@@ -30,6 +30,15 @@
 	nav .end { margin-top: 12px; }
 	nav .who { margin-top: 24px; padding: 0 12px; color: var(--dim); font-size: 13px; }
 	main { padding: 20px 24px 64px; width: 100%; max-width: 1440px; min-width: 0; margin: 0 auto; }
+	.main-col { min-width: 0; }
+	/* like the app's announcement bar (tidy.ts), in the warning colour */
+	#update-bar { display: flex; gap: 12px; align-items: flex-start; padding: 12px 24px; background: var(--gold); color: #000; }
+	#update-bar[hidden] { display: none; }
+	#update-bar .ub-body { flex: 1; min-width: 0; display: grid; gap: 8px; }
+	#update-bar .ub-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+	#update-bar .ub-buttons a, #update-bar .ub-buttons button { display: inline-flex; align-items: center; min-height: 32px; padding: 0 14px; border: 0; border-radius: 8px; background: rgb(0 0 0 / .15); color: #000; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+	#update-bar .ub-close { border: 0; background: none; color: #000; font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }
+	#update-bar code { font-family: ui-monospace, monospace; font-size: 13px; background: rgb(0 0 0 / .12); padding: 1px 5px; border-radius: 4px; }
 	h1 { margin: 0 0 16px; font-size: 22px; }
 	h2 { margin: 24px 0 10px; font-size: 17px; }
 	.bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
@@ -351,7 +360,7 @@
 	<nav id="nav">
 		<a href="/home" title="Back to {{instance}}"><img class="logo" src="/public/logo-dark.png" alt="{{instance}}"></a>
 	</nav>
-	<main id="main"></main>
+	<div class="main-col"><div id="update-bar" role="status" hidden></div><main id="main"></main></div>
 </div>
 <script>
 "use strict";
@@ -523,6 +532,34 @@ function tableSearch(main, inputId, rowSelector, countId, emptyId, label) {
 	update();
 }
 window.addEventListener("hashchange", route);
+
+// Admins: a bar atop every page when GitHub has a newer Xitter than this
+// instance runs (update-check.ts). Closing it hides it until the branch moves.
+async function showUpdate(fresh) {
+	const bar = $("#update-bar");
+	const { status: s } = await api(fresh ? "checkUpdate" : "updateStatus").catch(() => ({}));
+	bar.hidden = true;
+	if (!s?.outdated || !s.latest) {
+		if (fresh) notice(s?.error ? "Couldn't check: " + s.error : "This instance runs the latest Xitter");
+		return;
+	}
+	try { if (!fresh && localStorage.getItem("xitter-update-closed") === s.latest.sha) return; } catch {}
+	const where = esc(s.repo) + " (" + esc(s.branch) + ")";
+	const how = s.behind != null
+		? "It is " + s.behind + (s.behind === 1 ? " commit" : " commits") + " behind " + where + "."
+		: "Its code differs from " + where + " in " + s.changed_files + (s.changed_files === 1 ? " file" : " files") + ".";
+	bar.innerHTML = '<span class="icon">system_update</span><div class="ub-body"><div><b>This instance is out of date.</b> ' + how +
+		" Latest: " + esc(s.latest.message || s.latest.sha.slice(0, 12)) + (s.latest.date ? " (" + esc(when(s.latest.date)) + ")" : "") + ".</div>" +
+		"<div>To update, on the server: <code>git pull</code>, then <code>docker compose up -d --build</code>.</div>" +
+		'<div class="ub-buttons"><a href="https://github.com/' + esc(s.repo) + "/commits/" + esc(s.branch) + '" target="_blank" rel="noopener">What changed</a><button type="button" id="ub-check">Check again</button></div></div>' +
+		'<button type="button" class="ub-close" aria-label="Close until the next update">×</button>';
+	bar.hidden = false;
+	$("#ub-check").onclick = () => showUpdate(true);
+	bar.querySelector(".ub-close").onclick = () => {
+		try { localStorage.setItem("xitter-update-closed", s.latest.sha); } catch {}
+		bar.hidden = true;
+	};
+}
 
 async function route() {
 	const routeHash = location.hash;
@@ -2312,6 +2349,7 @@ async function renderUser(main, id) {
 	});
 	refreshCounts();
 	route();
+	if (can("admin")) showUpdate();
 })();
 </script>
 </body>
