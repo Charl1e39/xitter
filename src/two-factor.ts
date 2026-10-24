@@ -5,7 +5,7 @@ import { accountPage, esc } from "./account-page";
 import { sql } from "./db";
 import { hit, passwordTry } from "./ratelimit";
 import { settings } from "./settings";
-import { matchedStep, newSecret, otpauthUrl, verifyCode } from "./totp";
+import { matchingStep, newSecret, otpauthUrl } from "./totp";
 import { startSession, type Session, type Viewer } from "./auth";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -27,13 +27,13 @@ async function state(userId: string) {
 export async function codeAccepted(userId: string, input: string): Promise<boolean> {
 	const [u] = await sql`select totp_secret from users where id = ${userId}::bigint and totp_enabled`;
 	if (!u?.totp_secret) return false;
-	const step = matchedStep(u.totp_secret, input);
+	const step = matchingStep(u.totp_secret, input);
 	if (step !== undefined) {
-		// each code works once: one seen over a shoulder or in a log can't be used
-		// again in the minute and a half it stays valid
-		const fresh = await sql`update users set totp_last_step = ${step} where id = ${userId}::bigint and totp_enabled
+		// A code is good once: the step it came from is kept, and nothing from
+		// that step or before passes again, however long the drift window.
+		const spent = await sql`update users set totp_last_step = ${step} where id = ${userId}::bigint and totp_enabled
 			and (totp_last_step is null or totp_last_step < ${step}) returning id`;
-		return fresh.length > 0;
+		return spent.length > 0;
 	}
 	// backup codes: ten letters and digits, or six digits for ones made before
 	const clean = input.replace(/[\s-]/g, "").toLowerCase();
@@ -145,9 +145,11 @@ export async function twoFactorRoute(req: Request, url: URL, viewer: Viewer): Pr
 		if (!refund) return setup(req, u.totp_pending, viewer, "Too many tries for this account. Wait 15 minutes.");
 		if (!(await Bun.password.verify(field("password"), u.password_hash).catch(() => false))) return setup(req, u.totp_pending, viewer, "That password isn't right.");
 		refund();
-		if (!verifyCode(u.totp_pending, field("code"))) return setup(req, u.totp_pending, viewer, "That code isn't right. Try the next one your app shows.");
+		const step = matchingStep(u.totp_pending, field("code"));
+		if (step === undefined) return setup(req, u.totp_pending, viewer, "That code isn't right. Try the next one your app shows.");
 		const backups = Array.from({ length: 8 }, backupCode);
-		await sql`update users set totp_enabled = true, totp_secret = totp_pending, totp_pending = null, totp_last_step = null,
+		// the code that turned it on is spent too
+		await sql`update users set totp_enabled = true, totp_secret = totp_pending, totp_pending = null, totp_last_step = ${step},
 			totp_backup = ${JSON.stringify(backups.map((b) => sha(b.replace("-", ""))))}::text::jsonb where id = ${viewer.id}::bigint`;
 		return page(
 			req,

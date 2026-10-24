@@ -6,18 +6,24 @@ import { dirname, join, normalize } from "node:path";
 
 export const CLIENT_DIR = process.env.CLIENT_DIR ?? "client";
 export const CDN_ORIGIN = "https://abs.twimg.com";
+// where the client's files live on the CDN; nothing else is fetched for it
+const CDN_PATHS = /^\/(responsive-web|x-web|sticky|emoji|fonts|hashflags|images|favicons)\//;
+// the biggest file a build has is a few MB; a wasm chat build about ten
+const MAX_FILE = 64 * 1024 * 1024;
 const downloads = new Map<string, Promise<Buffer | undefined>>();
-// /abs/ answers before sign-in, so what it will fetch and keep is the
-// client's own: its bundle, its stock images and the chat app, each a bounded size
-const FETCHED = /^\/(responsive-web\/|sticky\/|x-web\/xchat\/)/;
-const MAX_FILE = 32 * 1024 * 1024;
 
-// (federation.ts has one too, but importing it would bring the database into
-// the client fetcher script)
-async function readLimited(r: Response, max: number): Promise<Uint8Array> {
-	if (Number(r.headers.get("content-length") ?? 0) > max) throw new Error("too large");
-	const reader = r.body?.getReader();
-	if (!reader) return new Uint8Array();
+export const clientPathAllowed = (cdnPath: string) => CDN_PATHS.test(cdnPath);
+
+export function hasClientFile(cdnPath: string): boolean {
+	const p = localPath(cdnPath);
+	return !!p && existsSync(p) && statSync(p).isFile();
+}
+
+// the body in pieces, or undefined once it passes max
+async function readUpTo(res: Response, max: number): Promise<Buffer | undefined> {
+	if (Number(res.headers.get("content-length") ?? 0) > max) return undefined;
+	const reader = res.body?.getReader();
+	if (!reader) return Buffer.alloc(0);
 	const parts: Uint8Array[] = [];
 	let size = 0;
 	for (;;) {
@@ -25,8 +31,8 @@ async function readLimited(r: Response, max: number): Promise<Uint8Array> {
 		if (done) break;
 		size += value.length;
 		if (size > max) {
-			await reader.cancel();
-			throw new Error("too large");
+			await reader.cancel().catch(() => {});
+			return undefined;
 		}
 		parts.push(value);
 	}
@@ -50,14 +56,14 @@ export async function getClientFile(cdnPath: string, allowFetch = true): Promise
 	const cached = readCached(cdnPath);
 	if (cached || !allowFetch) return cached;
 	const p = localPath(cdnPath);
-	if (!p || (existsSync(p) && !statSync(p).isFile()) || !FETCHED.test(cdnPath)) return undefined;
+	if (!p || !clientPathAllowed(cdnPath) || (existsSync(p) && !statSync(p).isFile())) return undefined;
 	let pending = downloads.get(p);
 	if (!pending) {
 		pending = (async () => {
-			const res = await fetch(CDN_ORIGIN + cdnPath);
+			const res = await fetch(CDN_ORIGIN + cdnPath, { signal: AbortSignal.timeout(60_000) });
 			if (!res.ok) return undefined;
-			const buf = Buffer.from(await readLimited(res, MAX_FILE).catch(() => new Uint8Array()));
-			if (!buf.length) return undefined;
+			const buf = await readUpTo(res, MAX_FILE);
+			if (!buf) return undefined;
 			mkdirSync(dirname(p), { recursive: true });
 			writeFileSync(p, buf);
 			return buf;

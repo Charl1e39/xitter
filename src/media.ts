@@ -15,6 +15,7 @@ import { remoteMediaFile } from "./federation-sync";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { blockedFor, protectedFor, suspendedFor } from "./blocks";
 import { isStaffRequest, staffViewer } from "./staff-access";
+import { circleSeen } from "./circles";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { settings } from "./settings";
@@ -646,30 +647,33 @@ async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefi
 	// only for unbound uploads so ordinary post images keep their indexed path.
 	const pollIds: string[] = served.post ? [] : (await sql`select id::text from polls where choice_media @> ${sql.array([served.id], "INT8")}`).map((p: any) => p.id);
 	if (!served.post && !pollIds.length) {
-		// Avatars, banners and other non-post references retain their access
-		// policy. Their URL may later be attached to private content.
-		const [profile] = await sql`select 1 from users where id = ${served.owner}::bigint
-			and (avatar_url = ${`/media/${served.id}`} or banner_url = ${`/media/banner/${served.id}`})`;
-		if (profile) return REVALIDATE;
-		// Anything else not in a post is its owner's (a draft's or scheduled
-		// post's, one the composer just took) unless something shows it to others:
-		// a list's or community's banner, or a published article. Ids are times,
-		// so they can be guessed.
-		if (served.owner === viewer.id || isStaffRequest()) return PRIVATE;
+		// What a profile, list, community or article shows is as open as that
+		// is (its URL may later be attached to private content, so it is
+		// revalidated): a private list's banner only to its owner, an article's
+		// pictures once it is published in a post the viewer may see. An upload
+		// nothing shows yet, a draft's or a scheduled post's, is its owner's
+		// alone: ids are snowflakes, not secrets.
+		const path = `/media/${served.id}`;
 		const [shown] = await sql`select 1 where
-			exists (select 1 from delegation_members d where d.owner_id = ${served.owner}::bigint and d.member_id = ${viewer.id}::bigint and d.status = 'Accepted')
+			exists (select 1 from users where id = ${served.owner}::bigint and (avatar_url = ${path} or banner_url = ${`/media/banner/${served.id}`}))
 			or exists (select 1 from lists l where l.banner_media_id = ${served.id}::bigint
 				and (l.owner_id = ${viewer.id}::bigint or (not l.is_private and l.owner_id not in ${blockedFor(viewer.id)})))
-			or exists (select 1 from communities c where c.banner_url = ${`/media/${served.id}`})
+			or exists (select 1 from communities where banner_url = ${path})
 			or exists (select 1 from articles a join posts post on post.article_id = a.id
 				where a.user_id = ${served.owner}::bigint and a.state = 'Published' and not a.hidden and not post.hidden
 					and (a.cover_media_id = ${served.id}::bigint or a.content_state::text like ${`%${served.id}%`})
-					and post.user_id not in ${protectedFor(viewer.id)} and post.user_id not in ${suspendedFor(viewer.id)} and post.user_id not in ${blockedFor(viewer.id)})`;
-		return shown ? PRIVATE : undefined;
+					and ${circleSeen(viewer.id, sql`post`)} and post.user_id not in ${protectedFor(viewer.id)}
+					and post.user_id not in ${suspendedFor(viewer.id)} and post.user_id not in ${blockedFor(viewer.id)})`;
+		if (shown) return REVALIDATE;
+		// besides its owner: the owner's delegates, who upload as the account,
+		// and staff past the admin panel's gate
+		if (served.owner === viewer.id || isStaffRequest()) return PRIVATE;
+		const [delegate] = await sql`select 1 from delegation_members where owner_id = ${served.owner}::bigint and member_id = ${viewer.id}::bigint and status = 'Accepted'`;
+		return delegate ? PRIVATE : undefined;
 	}
-	const [access] = await sql`select not post.hidden and not author.protected as open from posts post join users author on author.id = post.user_id where
+	const [access] = await sql`select not post.hidden and not author.protected and post.circle_owner_id is null as open from posts post join users author on author.id = post.user_id where
 		${served.post ? sql`post.id = ${served.post}::bigint` : sql`post.poll_id = any(${sql.array(pollIds, "INT8")})`}
-		and (not post.hidden or ${staffViewer(viewer.id)})
+		and (not post.hidden or ${staffViewer(viewer.id)}) and ${circleSeen(viewer.id, sql`post`)}
 		and post.user_id not in ${protectedFor(viewer.id)}
 		and post.user_id not in ${suspendedFor(viewer.id)}
 		and post.user_id not in ${blockedFor(viewer.id)} limit 1`;
