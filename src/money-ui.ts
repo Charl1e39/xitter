@@ -117,6 +117,8 @@ export const MONEY_UI_SCRIPT = `(function(){
 	function cards(){
 		var want={};
 		document.querySelectorAll('[data-testid="card.wrapper"]:not([data-xm-hidden])').forEach(function(w){
+			// posts only: the composer's own link preview is the composer's business
+			if(!w.closest("article"))return;
 			var a=[].find.call(w.querySelectorAll("a[href]"),function(a){return keyOf(a.getAttribute("href"))});
 			if(!a)return;
 			var id=keyOf(a.getAttribute("href")),by=authorOf(w),key=id+"|"+by;
@@ -272,6 +274,13 @@ export const MONEY_UI_SCRIPT = `(function(){
 			var shown=root.parentElement&&[].find.call(root.parentElement.children,function(c){return c.hasAttribute("data-xm-compose")});
 			var a=attachmentOf(editor),typed=a?null:linkIn(editor.textContent||"");
 			var key=a?a.key:typed&&dismissed.indexOf(typed)<0?keyOf(typed):null;
+			// X's own preview of a payment link the person typed: ours stands in for it
+			var area=root.parentElement;
+			if(area)[].forEach.call(area.querySelectorAll('[data-testid="card.wrapper"]'),function(w){
+				var money=[].some.call(w.querySelectorAll("a[href]"),function(l){return keyOf(l.getAttribute("href"))});
+				if(money&&key&&!w.hasAttribute("data-xm-hidden"))w.setAttribute("data-xm-hidden","");
+				else if(!key&&w.hasAttribute("data-xm-hidden"))w.removeAttribute("data-xm-hidden");
+			});
 			if(!key||!root.parentElement){if(shown)shown.remove();return}
 			var ck=key+"|"+me+"|preview";
 			if(cache[ck]===undefined){fetchCards(me,[key],true);return}
