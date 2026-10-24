@@ -107,10 +107,13 @@ async function servePublic(p: string): Promise<Response> {
 	if (hashflag) return hashflagAsset(hashflag[1], hashflag[2]);
 	const card = /^card-(\d{1,19})\.img$/.exec(name);
 	if (card) return cardImage(card[1]);
-	const flag = /^flag-([a-z]+)\.svg$/.exec(name);
+	const flag = /^flag-([a-z]+(?:-[a-z]{2})?)\.svg$/.exec(name);
 	if (flag) {
-		const svg = flagSvg(flag[1]);
-		return svg ? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } }) : new Response("not found", { status: 404 });
+		const svg = await flagSvg(flag[1]);
+		// a country's image comes from elsewhere: opened on its own, it may not run anything here
+		return svg
+			? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'", "x-content-type-options": "nosniff" } })
+			: new Response("not found", { status: 404 });
 	}
 	if (!/^[\w.-]+\.(png|svg|ico|webp)$/.test(name)) return new Response("not found", { status: 404 });
 	// a logo uploaded in the admin panel replaces the shipped one
