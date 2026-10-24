@@ -259,9 +259,11 @@ export const TIDY_SCRIPT = `(function(){
 	function own(href){
 		var u=new URL(href,location.href);
 		if(full(u.pathname))return full(u.pathname)+u.search;
+		// the index (/account/) is Settings > Xitter settings, whose entry links to /settings/xitter
+		if(u.pathname==="/account/")return "/settings/xitter"+u.search;
 		return u.pathname.indexOf("/account/")===0?OWN+u.pathname.slice(9)+u.search:u.pathname+u.search+u.hash;
 	}
-	function framed(p){return p.indexOf(OWN)===0?"/account/"+p.slice(OWN.length):fullOf(p)||null}
+	function framed(p){return p==="/settings/xitter"?"/account/":p.indexOf(OWN)===0?"/account/"+p.slice(OWN.length):fullOf(p)||null}
 	// the client follows the address on popstate, so this moves it without a reload
 	function go(path,replace){
 		if(location.pathname+location.search+location.hash===path)return;
@@ -450,21 +452,6 @@ export const TIDY_SCRIPT = `(function(){
 			[].forEach.call(a.querySelectorAll("span"),function(n){var w=on?"700":"400";if(n.style.fontWeight!==w)n.style.fontWeight=w});
 		});
 	}
-	function accountRows(){
-		var rows=(T.links||[]).filter(function(l){return l.where==="settings"||l.where==="both"});
-		var screen=document.querySelector('[data-testid="accountScreen"]');
-		if(!rows.length||!screen||screen.querySelector("[data-xitter-link]"))return;
-		var last=screen.querySelector('a[href="/settings/deactivate"]');
-		var all=screen.querySelectorAll('a[data-testid="pivot"]');
-		var row=(last||all[all.length-1]||{}).parentNode;
-		if(!row)return;
-		var next=last?row:row.nextSibling;
-		rows.forEach(function(l){
-			var box=row.cloneNode(true);
-			copy(box.querySelector("a"),l);
-			row.parentNode.insertBefore(box,next);
-		});
-	}
 	function twoFactorRow(){
 		var a=document.querySelector('a[href="/settings/account/login_verification"]');
 		if(!a)return;
@@ -533,7 +520,6 @@ export const TIDY_SCRIPT = `(function(){
 		footer();
 		menuLinks();
 		navLinks();
-		accountRows();
 		twoFactorRow();
 		navWidth();
 		announce();

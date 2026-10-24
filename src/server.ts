@@ -38,6 +38,7 @@ import { startScheduler } from "./scheduled";
 import { federationRoute, startFederation } from "./federation-routes";
 import { acceptTicket, superadminHomeRoute } from "./superadmin";
 import { gifProxy } from "./gifs";
+import { accountIndexRoute } from "./account-page";
 import { gifSettingsRoute } from "./gif-settings";
 import { classicDetailRoute, postCounts } from "./classic-detail";
 import { cardImage } from "./explore-cards";
@@ -91,7 +92,7 @@ const MIME: Record<string, string> = {
 // The client also calls outside services on its own (grok.com checkout, ads
 // measurement). Requests from the page may only reach this instance.
 const SETTINGS_PAGES = new Set(
-	["apps", "invites", "organisation", "decor", "theme", "decoration", "automation", "notices", "instances", "passkeys", "import", "migrate", "api", "notes/appeals", "email", "2fa", "merchant", "gifs"].map((s) => `/account/${s}`),
+	["apps", "invites", "organisation", "decor", "theme", "decoration", "automation", "notices", "instances", "passkeys", "import", "migrate", "api", "notes/appeals", "email", "2fa", "merchant", "gifs", "post-details"].map((s) => `/account/${s}`),
 );
 
 const PAGE_CSP = "connect-src 'self' blob: data:; font-src 'self'";
@@ -461,6 +462,9 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (viewer && req.method === "GET" && req.headers.get("sec-fetch-dest") === "document" && (p === "/account/money" || p.startsWith("/account/money/"))) return Response.redirect(`/i/xmoney${p.slice("/account/money".length)}${url.search}`, 302);
 	if (p === "/oauth/authorize") return oauthAuthorize(req, url, viewer);
 	if (p === "/account/apps" && viewer) return connectedAppsRoute(req, viewer);
+	// opened on its own, the index comes up as Settings > Xitter settings, like the pages it lists
+	if ((p === "/account" || p === "/account/") && viewer && req.method === "GET" && req.headers.get("sec-fetch-dest") === "document") return Response.redirect("/settings/xitter", 302);
+	if ((p === "/account" || p === "/account/") && viewer) return accountIndexRoute(req, viewer);
 	if (p === "/account/gifs" && viewer) return gifSettingsRoute(req, viewer);
 	if (p === "/account/post-details" && viewer) return classicDetailRoute(req, viewer);
 	if (p === "/account/apps/developer" && viewer) return developerAppsRoute(req, viewer);
