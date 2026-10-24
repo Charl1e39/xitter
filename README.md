@@ -222,6 +222,11 @@ copy during setup, and it stays on that machine.
   editing profiles, resetting passwords…) on or off for moderators and support,
   and who sees IP addresses, email addresses, invite codes and server errors
   (`src/staff-permissions.ts`; `bun scripts/test-staff-permissions.ts` checks it)
+- Updating from the panel (Admin > Server update, off until `SELF_UPDATE=on`):
+  admins update a git checkout from Xittered/xitter or any GitHub repository
+  and branch they name. It backs up the database, fetches and checks out the
+  branch, runs `bun install`, stays on the old commit if the new code doesn't
+  load, and restarts; "Go back" returns to the commit before
 
 Not built yet: Spaces and live video, Moments. Email is sent over SMTP to your own mail server when
 `SMTP_URL` is set, or through [Resend](https://resend.com) when
@@ -369,6 +374,7 @@ cache and autovacuum settings; adjust them for the host's memory and workload.
 | `XITTER_VERSION` | `version` in `package.json` | The version this instance reports in `/.well-known/xitter` and compares when an account moves |
 | `XITTER_COMMIT` | read from `.git` | The commit `/.well-known/xitter` shows, for images built without `.git`; the update check also uses it to count how far behind the instance is |
 | `UPDATE_CHECK`, `UPDATE_REPO`, `UPDATE_BRANCH`, `UPDATE_GITHUB_TOKEN` | on, the GitHub repository `SOURCE_URL` names (else `Xittered/xitter`), `main`, unset | Every six hours the server asks GitHub whether this branch has a newer Xitter, and admins see a banner atop the panel when it does. `UPDATE_CHECK=off` turns that off; a token raises GitHub's limit of 60 requests an hour per address |
+| `SELF_UPDATE`, `SELF_UPDATE_REPOS`, `SELF_UPDATE_RESTART` | off, any GitHub repository, exit | `on` lets admins update this checkout from Admin > Server update. The code they pick runs as this server, so `SELF_UPDATE_REPOS` (`owner/name`, comma-separated) can limit where from. The server's user must own the checkout and reach `pg_dump` (`PG_DUMP`). To restart, the process exits with code 75, for systemd (`Restart=on-failure` or `always`) or Docker to start it again; `SELF_UPDATE_RESTART` runs a shell command instead |
 | `MIGRATION_ALLOW_HTTP`, `MIGRATION_ALLOW_PRIVATE` | unset | `1` lets an account move from an instance over plain HTTP, or on a private network. For test instances only |
 
 Everything else (name, sign-up mode, features, limits, announcement, rules,
