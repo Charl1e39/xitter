@@ -2002,14 +2002,16 @@ const RENDER = {
 		}
 		if (offset === undefined) offset = Number(sessionStorage.getItem("auditOffset")) || 0;
 		const request = ++auditRequest;
-		const { entries, total } = await api("audit", { ...filter, offset });
+		const { entries, total, actions = [] } = await api("audit", { ...filter, offset });
+		// a saved filter stays selectable even once its action has left the log
+		const choices = filter.action && !actions.includes(filter.action) ? [filter.action, ...actions] : actions;
 		if (request !== auditRequest || location.hash.slice(1).split("/")[0] !== "audit") return;
 		const page = Math.floor(offset / 100) + 1, pages = Math.max(1, Math.ceil(total / 100));
 		const range = "Showing " + (offset + 1) + "–" + (offset + entries.length) + " of " + total + " entries";
 		const pager = total > 0 ? '<div class="audit-paging"><span class="dim small">' + range + '</span><div class="row"><button class="btn" data-audit-page="prev"' + (offset <= 0 ? " disabled" : "") + '>Previous</button><span class="dim small">Page ' + page + " of " + pages + '</span><button class="btn" data-audit-page="next"' + (offset + entries.length >= total ? " disabled" : "") + '>Next</button></div></div>' : "";
 		main.innerHTML = '<h1>Audit log</h1><div class="bar"><input id="auditWho" aria-label="Filter by target account" placeholder="Target @handle" value="' + esc(filter.target || "") + '">' +
-			'<select id="auditAction" aria-label="Filter by action"><option value="">Every action</option>' + ["automod_strike", "automod_second_chance", "escalate", "expire_sanction", "auto_suspend_name", "temporary_status", "set_status", "bulk_status", "send_staff_message", "revoke_strike", "bulk_strike", "resolve_appeal", "save_automod", "set_role", "set_staff_permissions"]
-				.map((a) => '<option value="' + a + '"' + (filter.action === a ? " selected" : "") + ">" + a.replace(/_/g, " ") + "</option>").join("") + "</select>" +
+			'<select id="auditAction" aria-label="Filter by action"><option value="">Every action</option>' + choices
+				.map((a) => '<option value="' + esc(a) + '"' + (filter.action === a ? " selected" : "") + ">" + esc(a.replace(/_/g, " ")) + "</option>").join("") + "</select>" +
 			'<label class="row"><input type="checkbox" id="auditAuto"' + (filter.automatic ? " checked" : "") + '> Automatic only</label><span class="dim small" id="auditLoading" hidden>Updating…</span></div>' + pager +
 			(entries.length ? '<div class="audit-list">' + entries.map((e) => {
 				const target = e.target_name ? '<a href="#user/' + esc(e.target) + '">@' + esc(e.target_name) + "</a>" : e.target ? esc(e.target) : "";

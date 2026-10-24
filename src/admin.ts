@@ -913,8 +913,11 @@ const ACTIONS: Record<string, Action> = {
 					left join users t on l.target ~ '^[0-9]+$' and t.id = l.target::bigint
 					where ${action ? sql`l.action = ${action}` : sql`true`} and ${b.automatic ? sql`l.actor_id is null` : sql`true`}
 						and ${who ? sql`lower(t.screen_name) = lower(${who})` : sql`true`}`;
+			// the filter offers what the log holds: actions are logged from all over, and a fixed list misses some
+			const actions = await sql`select distinct action from audit_log order by action`;
 			return {
 				total: Number(total[0]?.total ?? 0),
+				actions: actions.map((r: { action: string }) => r.action),
 				entries: await sql`select l.id::text as id, l.action, l.target, l.detail, l.created_at, a.screen_name as actor, l.actor_id is null as automatic,
 					t.screen_name as target_name
 					from audit_log l left join users a on a.id = l.actor_id
