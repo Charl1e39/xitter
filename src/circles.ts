@@ -14,14 +14,20 @@ import { accountPage, esc } from "./account-page";
 import type { Viewer } from "./auth";
 import { sql } from "./db";
 import { feature } from "./settings";
+import { staffViewer } from "./staff-access";
 
 export const MAX_CIRCLE = 150;
 
-// whether the viewer may see a post (aliased `p` unless named): one outside
-// any Circle, or one of a Circle they own or are in
-export const circleSeen = (viewerId: string, p: unknown = sql`p`) =>
+// whether a post (aliased `p` unless named) is outside any Circle, or in one
+// the viewer owns or is in: what reaches their home timeline and notifications
+export const circleMember = (viewerId: string, p: unknown = sql`p`) =>
 	sql`(${p}.circle_owner_id is null or ${p}.circle_owner_id = ${viewerId}::bigint
 		or exists (select 1 from circle_members cm where cm.owner_id = ${p}.circle_owner_id and cm.member_id = ${viewerId}::bigint))`;
+
+// whether the viewer may see a post where they go looking (the post itself,
+// a profile, search): staff see every Circle's, as they see hidden posts, so
+// they can moderate them
+export const circleSeen = (viewerId: string, p: unknown = sql`p`) => sql`(${circleMember(viewerId, p)} or ${staffViewer(viewerId)})`;
 
 // the client's audience menu: its Subscribers choice, named Circle, for every
 // account while Circles are on (shell.ts sets window.__XITTER__.circles)

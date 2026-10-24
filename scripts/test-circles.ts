@@ -1,6 +1,8 @@
 // Circles (circles.ts): a Circle post shows only to its author and the people
 // in their Circle, with X's Circle label; replies stay in the Circle; it
-// can't be reposted or quoted, and it never federates. Run against the live server.
+// can't be reposted or quoted, and it never federates. Staff see it where they
+// go looking (the post, the profile, search), not in their own timeline or
+// notifications. Run against the live server.
 // usage: bun scripts/test-circles.ts   (TEST_ORIGIN, else http://localhost:3000)
 import { createUser } from "../src/auth";
 import { sql } from "../src/db";
@@ -24,14 +26,15 @@ async function session(username: string) {
 
 const stamp = Date.now().toString().slice(-7);
 const word = `circleword${stamp}`;
-const ids = await Promise.all(["cown", "cin", "cout"].map((n) => createUser(n + stamp, n, password)));
+const ids = await Promise.all(["cown", "cin", "cout", "cstaff"].map((n) => createUser(n + stamp, n, password)));
 try {
-	const [owner, member, outsider] = await Promise.all(["cown", "cin", "cout"].map((n) => session(n + stamp)));
+	await sql`update users set role = 'moderator' where id = ${ids[3]}::bigint`;
+	const [owner, member, outsider, staff] = await Promise.all(["cown", "cin", "cout", "cstaff"].map((n) => session(n + stamp)));
 	const csrf = /name="csrf" value="([^"]+)"/.exec(await owner.page("/account/circle"))![1];
 	check("the Circle page adds a member", (await owner.page("/account/circle", { csrf, add: `@cin${stamp}` })).includes(`Added @cin${stamp}`));
-	await sql`insert into follows (follower_id, followee_id) values (${ids[1]}::bigint, ${ids[0]}::bigint), (${ids[2]}::bigint, ${ids[0]}::bigint) on conflict do nothing`;
+	await sql`insert into follows (follower_id, followee_id) values (${ids[1]}::bigint, ${ids[0]}::bigint), (${ids[2]}::bigint, ${ids[0]}::bigint), (${ids[3]}::bigint, ${ids[0]}::bigint) on conflict do nothing`;
 
-	const made = await owner.gql("CreateTweet", { tweet_text: `for the circle ${word}`, exclusive_tweet_control_options: {} });
+	const made = await owner.gql("CreateTweet", { tweet_text: `for the circle ${word} @cstaff${stamp}`, exclusive_tweet_control_options: {} });
 	const id = made.data?.create_tweet?.tweet_results?.result?.rest_id;
 	check("a Circle post is made", !!id, made);
 	const label = (r: any) => (r?.tweet ?? r)?.trusted_friends_info_result?.owner_results?.result?.core?.screen_name;
@@ -44,6 +47,11 @@ try {
 	check("Following hides it from anyone else", !leaks(await outsider.gql("HomeLatestTimeline", { count: 40 })));
 	check("the profile hides it from anyone else", !leaks(await outsider.gql("UserTweets", { userId: ids[0], count: 40 })));
 	check("search hides it from anyone else", !leaks(await outsider.gql("SearchTimeline", { rawQuery: word, product: "Latest", count: 20 })));
+	check("staff see it, labelled", label(await read(staff)) === `cown${stamp}`, await read(staff));
+	check("staff see it on the profile", leaks(await staff.gql("UserTweets", { userId: ids[0], count: 40 })));
+	check("staff find it in search", leaks(await staff.gql("SearchTimeline", { rawQuery: word, product: "Latest", count: 20 })));
+	check("staff's own Following leaves it out", !leaks(await staff.gql("HomeLatestTimeline", { count: 40 })));
+	check("mentioned staff outside the Circle aren't notified", !leaks(await staff.gql("NotificationsTimeline", { timeline_type: "All", count: 40 })));
 
 	const reply = await member.gql("CreateTweet", { tweet_text: `reply ${word}`, reply: { in_reply_to_tweet_id: id } });
 	const replyId = reply.data?.create_tweet?.tweet_results?.result?.rest_id;

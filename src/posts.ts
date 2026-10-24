@@ -23,7 +23,7 @@ import { saveMentions } from "./mentions";
 import { cleanText } from "./text-clean";
 import { replyControl, replyRestricted } from "./reply-controls";
 import { noteStatus } from "./note-score";
-import { circleSeen } from "./circles";
+import { circleMember, circleSeen } from "./circles";
 
 const NO_LIMIT = "9223372036854775807";
 
@@ -330,9 +330,10 @@ export async function feed(q: FeedQuery): Promise<FeedItem[]> {
 				: sql`exists (select 1 from media m where m.post_id = f.post_id and m.kind <> 'video')`;
 	// a community's posts stay in the community for everyone who isn't in it
 	const communityFilter = "community" in q.authors ? sql`true` : communityVisible(q.viewerId);
-	// Circle posts the viewer isn't in would only drop out later and shorten the page
-	const circleFilter = sql`exists (select 1 from posts x where x.id = f.post_id and ${circleSeen(q.viewerId, sql`x`)})`;
 	const home = !("user" in q.authors);
+	// Circle posts the viewer isn't in would only drop out later and shorten the
+	// page; staff see them on profiles, not in their own timelines
+	const circleFilter = sql`exists (select 1 from posts x where x.id = f.post_id and ${home ? circleMember(q.viewerId, sql`x`) : circleSeen(q.viewerId, sql`x`)})`;
 	const hidden = home ? ("list" in q.authors || "community" in q.authors ? homeHidden(q.viewerId) : sql`${homeHidden(q.viewerId)} and ${listMuted(q.viewerId)}`) : profileHidden(q.viewerId);
 	const rows = q.after
 		? await sql`select * from feed_items f where ${authorFilter} and ${kindFilter} and ${replyFilter} and ${mediaFilter} and ${articleFilter} and ${communityFilter} and ${circleFilter} and ${hidden} and f.item_id > ${q.after}::bigint
