@@ -784,7 +784,8 @@ const RENDER = {
 		let offset = 0;
 		main.innerHTML = (user ? '<p><a href="#user/' + esc(user) + '">← Account</a> · <a href="#media">All media</a></p><h1>Media from <span id="mwho">this account</span></h1>' : "<h1>Media</h1>") +
 			'<p class="dim small">Newest first. Deleting removes the file from every post and profile that uses it.</p>' +
-			(can("deleteMedia") ? '<div class="bar" id="mbulk" hidden><span class="small" id="mpicked"></span><button class="btn danger" id="mdel">Delete selected</button></div>' : "") +
+			'<form class="bar" id="mfind"><input id="mname" type="search" placeholder="An account, like @name" style="min-width:260px" aria-label="Show the uploads of one account" autocomplete="off"><button class="btn" type="submit">Show their media</button></form>' +
+			(can("deleteMedia") ? '<div class="bar"><label class="row small"><input type="checkbox" id="mall"> Select all shown</label></div><div class="bar" id="mbulk" hidden><span class="small" id="mpicked"></span><button class="btn danger" id="mdel">Delete selected</button></div>' : "") +
 			'<p class="small" id="mresult" role="status"></p><div class="mediagrid" id="grid"></div><div class="row" style="margin-top:16px"><button class="btn" id="more">Show more</button></div>';
 		const mpicked = () => [...main.querySelectorAll("[data-mpick]:checked")].map((c) => c.dataset.mpick);
 		const updateMediaPick = () => {
@@ -794,6 +795,15 @@ const RENDER = {
 			$("#mpicked").textContent = n + " selected:";
 		};
 		main.addEventListener("change", (e) => { if (e.target.matches("[data-mpick]")) updateMediaPick(); });
+		$("#mfind").onsubmit = (e) => {
+			e.preventDefault();
+			const name = $("#mname").value.trim();
+			if (name) act(async () => { const u = await api("mediaAccount", { screen_name: name }); location.hash = "#media/" + u.id; });
+		};
+		if ($("#mall")) $("#mall").onchange = () => {
+			main.querySelectorAll("[data-mpick]").forEach((c) => { c.checked = $("#mall").checked; });
+			updateMediaPick();
+		};
 		if ($("#mdel")) $("#mdel").onclick = async () => {
 			const ids = mpicked();
 			if (!ids.length || !(await ask("Delete " + ids.length + " files for good?"))) return;
