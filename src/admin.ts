@@ -137,6 +137,7 @@ const ACTIONS: Record<string, Action> = {
 			media: { stored: storesRemoteMedia(), ...(await savedRemoteMedia()) },
 			registry: { sequence: registrySequence(), checked_at: registryCheckedAt ? new Date(registryCheckedAt).toISOString() : null, error: registryError },
 			outbox_head: head,
+			remote_checkmarks: settings().remote_checkmarks,
 			superadmins: SUPERADMINS.map((x) => `${x.screen_name}@${x.instance}`),
 			superadmin: !!a.superadmin,
 			instances: await Promise.all(
@@ -200,6 +201,12 @@ const ACTIONS: Record<string, Action> = {
 		const dropped = await dropRemoteMedia();
 		await audit(a, "federation_drop_media", INSTANCE_ID, dropped);
 		return dropped;
+	} },
+	setRemoteCheckmarks: { role: "admin", run: async (a, b) => {
+		if (typeof b.enabled !== "boolean") throw new AdminError("Provide a boolean setting.");
+		await setSetting("remote_checkmarks", b.enabled);
+		await audit(a, "set_remote_checkmarks", INSTANCE_ID, { enabled: b.enabled });
+		return {};
 	} },
 	federationPull: { role: "admin", run: async (a, b) => {
 		const id = instanceOf(b.instance);
