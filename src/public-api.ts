@@ -72,20 +72,20 @@ export async function createToken(userId: string, name: string, scope: "read" | 
 	return token;
 }
 
-async function tokenViewer(req: Request): Promise<{ viewer: Viewer; scope: string; app: boolean } | undefined> {
+async function tokenViewer(req: Request): Promise<{ viewer: Viewer; scope: string } | undefined> {
 	const token = /^Bearer\s+(xit_[0-9a-f]{48})$/i.exec(req.headers.get("authorization") ?? "")?.[1];
 	if (!token) return undefined;
 	const [row] = await sql`
 		select u.id::text, u.screen_name, u.name, u.bio, u.location, u.website, u.avatar_url, u.banner_url, u.verified_type, u.flag, u.status, u.role, u.protected, u.language, u.created_at,
-			t.scope, t.id::text as token_id, t.last_used_at, c.name as app_name, t.client_id is not null as app
+			t.scope, t.id::text as token_id, t.last_used_at, c.name as app_name
 		from api_tokens t join users u on u.id = t.user_id left join oauth_clients c on c.id = t.client_id
 		where t.token_hash = ${hash(token)} and u.status <> 'suspended' and u.deactivated_at is null
 			and (t.expires_at is null or t.expires_at > now()) and (t.client_id is null or c.revoked = false)`;
 	if (!row) return undefined;
 	if (!row.last_used_at || Date.now() - row.last_used_at.getTime() > 60_000) await sql`update api_tokens set last_used_at = now() where id = ${row.token_id}::bigint`;
-	const { scope, token_id: _id, last_used_at: _used, app_name, app, ...user } = row;
+	const { scope, token_id: _id, last_used_at: _used, app_name, ...user } = row;
 	// staff tokens are limited like anyone's: the exemption is for the panel
-	return { viewer: { ...user, role: null, csrf: "", token: "", postSource: app_name ? `App: ${app_name}` : "Xitter API" } as Viewer, scope, app };
+	return { viewer: { ...user, role: null, csrf: "", token: "", postSource: app_name ? `App: ${app_name}` : "Xitter API" } as Viewer, scope };
 }
 
 // ---- shapes
@@ -440,7 +440,7 @@ const MONEY_ROUTES: Route[] = [
 	{ method: "GET", pattern: /^\/money\/requests\/(\d{1,19})$/, scope: "read", run: async (v, m) => (await moneyOn(v, { accepted: false }), { data: await oneRequest(v, m[1]) }) },
 ];
 
-type Route = { method: string; pattern: RegExp; scope: "read" | "write"; bucket?: Bucket; money?: true; run: (v: Viewer, m: RegExpExecArray, req: Request, url: URL) => Promise<unknown> };
+type Route = { method: string; pattern: RegExp; scope: "read" | "write"; bucket?: Bucket; run: (v: Viewer, m: RegExpExecArray, req: Request, url: URL) => Promise<unknown> };
 
 const op = async (name: string, v: Viewer, vars: Record<string, unknown>) => {
 	try {
@@ -606,7 +606,7 @@ const ROUTES: Route[] = [
 		if (!isId(m[1])) throw new ApiError(404, "Unknown upload.");
 		return { data: mediaResult(m[1], await callMedia(v, { command: "STATUS", media_id: m[1] })) };
 	} },
-	...MONEY_ROUTES.map((r) => ({ ...r, money: true as const })),
+	...MONEY_ROUTES,
 ];
 
 export async function publicApi(req: Request, url: URL): Promise<Response> {
@@ -614,7 +614,7 @@ export async function publicApi(req: Request, url: URL): Promise<Response> {
 	if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 	const auth = await tokenViewer(req);
 	if (!auth) return withCors(fail(401, "Send a personal or connected-app token as Authorization: Bearer xit_..."));
-	const { viewer, scope, app } = auth;
+	const { viewer, scope } = auth;
 	let route: Route | undefined;
 	let match: RegExpExecArray | null = null;
 	for (const r of ROUTES) {
@@ -628,9 +628,6 @@ export async function publicApi(req: Request, url: URL): Promise<Response> {
 	}
 	if (!route || !match) return withCors(fail(404, "No such endpoint. See /api for the list."));
 	if (route.scope === "write" && scope !== "write") return withCors(fail(403, "This token can only read."));
-	// the consent page asks to post and read, never to spend: an app's token can't
-	// touch the account's Equicoins, only the account's own personal tokens can
-	if (route.money && app) return withCors(fail(403, "Connected apps can't use Equicoins. Use a personal API token (/account/api) instead."));
 	if (settings().operations.maintenance) return withCors(fail(503, settings().operations.message || "The instance is under maintenance."));
 
 	const where = `api ${route.method} ${route.pattern.source}`;

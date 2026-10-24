@@ -1,12 +1,12 @@
 // A moved account's Equicoins balance arriving from its old instance
 // (money-federation.ts), against a migrated, disposable local database: taken
 // once per old account however many imports it was the source of, never for a
-// failed import, and at most one move's worth from a peer a day.
+// failed import, and at most MOVES_A_DAY moves' worth from a peer a day.
 import { strict as assert } from "node:assert";
 import { sql } from "../src/db";
 import { peers } from "../src/federation";
 import { newId } from "../src/ids";
-import { moneyFederationApi } from "../src/money-federation";
+import { MOVES_A_DAY, moneyFederationApi } from "../src/money-federation";
 import { loadSettings, setSetting, settings } from "../src/settings";
 
 const database = new URL(process.env.DATABASE_URL ?? "postgres://localhost/xitter");
@@ -52,9 +52,14 @@ try {
 	await migration(first, "done");
 	assert.equal(await move(first, 1000), 403, "a second import of the same account moves nothing more");
 
+	// the rest of the day's allowance taken by other moves, but for one cent
+	const filler = newId();
+	transfers.push(filler);
+	await sql`insert into money_federation_receipts (origin, transfer_id, amount_cents, move) values (${peer}, ${filler}::bigint, ${MOVES_A_DAY * cap - cap / 2 - 1}, true)`;
+	assert.equal(await move(first, 1000), 403, "an account that already moved is told so even then, not asked to retry");
 	await migration(second, "done");
-	assert.equal(await move(second, cap / 2 + 1), 429, "past a move's worth a day, the peer is asked to retry later");
-	assert.equal(await move(second, cap / 2), 200, "up to it, another account's move is taken");
+	assert.equal(await move(second, 2), 429, "past a day's allowance, the peer is asked to retry later");
+	assert.equal(await move(second, 1), 200, "up to it, another account's move is taken");
 	await migration(third, "done");
 	assert.equal(await move(third, 1), 429, "and then nothing more that day");
 	console.log("ok: moved balances are taken once per account, never for a failed import, within a day's allowance");

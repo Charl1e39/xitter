@@ -10,6 +10,8 @@ import { feature, hasBlockedPhrase, settings } from "./settings";
 let pumping = false;
 // a moved balance is taken up to this many times the largest payment
 const MOVE_CAP = 100;
+// and all of one peer's moves in a day, in full-size moves (most are far smaller)
+export const MOVES_A_DAY = 20;
 // a transfer the peer hasn't taken after this long fails and goes back to the sender
 const GIVE_UP_AFTER = "3 days";
 
@@ -104,14 +106,16 @@ export async function moneyFederationApi(incoming: Incoming, method: string, pat
 			if (!move && !(await peerHasRoom(tx, incoming.from, amount))) return "full";
 			if (move) {
 				// One move per old account ever, however many imports it was the source
-				// of; and a peer's moves together take at most one move's worth a day.
-				// Over that it is answered 429, which the peer retries later.
+				// of; and a peer's moves together take at most MOVES_A_DAY moves' worth
+				// a day. Over that it is answered 429, which the peer retries for
+				// GIVE_UP_AFTER, so an instance closing down still gets its people over.
+				const [already] = await tx`select 1 from account_migrations where source = any(${sql.array(sources, "TEXT")})
+					and source_user_id = ${senderMatch[1]}::bigint and balance_moved_at is not null limit 1`;
+				if (already) return "moved";
 				const [day] = await tx`select coalesce(sum(amount_cents), 0)::bigint as n from money_federation_receipts
 					where origin = ${incoming.from} and move and created_at > now() - interval '1 day'`;
-				if (Number(day.n) + amount > cap) return "busy";
-				const took = await tx`update account_migrations m set balance_moved_at = now() where id = ${migrationId}::bigint and balance_moved_at is null
-					and not exists (select 1 from account_migrations x where x.source = any(${sql.array(sources, "TEXT")}) and x.source_user_id = m.source_user_id and x.balance_moved_at is not null)
-					returning 1`;
+				if (Number(day.n) + amount > MOVES_A_DAY * cap) return "busy";
+				const took = await tx`update account_migrations set balance_moved_at = now() where id = ${migrationId}::bigint and balance_moved_at is null returning 1`;
 				if (!took.length) return "moved";
 			}
 			await tx`insert into money_federation_receipts (origin, transfer_id, amount_cents, move) values (${incoming.from}, ${transferId}::bigint, ${amount}, ${move})`;
