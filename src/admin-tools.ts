@@ -19,6 +19,7 @@ import { blockedNameIn, blockedWordIn, suspendForName } from "./names";
 import { setSetting, settings } from "./settings";
 import { clientIp, ipAllowed, parseRange } from "./staff-access";
 import { allows } from "./staff-permissions";
+import { checkForUpdate, updateStatus } from "./update-check";
 import { BACKUP_DIR, createBackup, deleteBackup, listBackups } from "./backups";
 import { clientStatus, latestSha, rollbackClient, updateClient } from "./client-update";
 import { decideImport, pendingImports } from "./archive-import";
@@ -632,6 +633,9 @@ export const toolActions: Record<string, Action> = {
 		},
 	},
 
+	// update-check.ts: what the last check found (one runs if none has), or a fresh check
+	updateStatus: { role: "admin", run: async () => ({ status: updateStatus() ?? (process.env.UPDATE_CHECK === "off" ? null : await checkForUpdate()) }) },
+	checkUpdate: { role: "admin", run: async () => ({ status: await checkForUpdate() }) },
 	// backups.ts; restoring is pg_restore on the server, not something done from a browser
 	backups: { role: "admin", run: async () => ({ backups: listBackups(), schedule: settings().backups, dir: BACKUP_DIR }) },
 	createBackup: {
