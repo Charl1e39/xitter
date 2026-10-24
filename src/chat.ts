@@ -204,13 +204,28 @@ async function signingKey(userId: string, version: string | undefined): Promise<
 
 // --- conversations
 
-export class ChatError extends Error {}
+export class ChatError extends Error {
+	constructor(message: string, public code?: number) {
+		super(message);
+	}
+}
 
 // A direct conversation's id names its two members, smaller id first:
 // "<a>-<b>" (older clients wrote "<a>:<b>").
 function directMembers(id: string): [string, string] | undefined {
 	const m = /^(\d{1,19})[-:](\d{1,19})$/.exec(id);
 	return m ? [m[1], m[2]] : undefined;
+}
+
+async function restrictedCanMessage(viewerId: string, conversationId: string, kind: number) {
+	const pair = directMembers(conversationId);
+	if (!pair || kind !== KIND.message) return false;
+	const peer = pair.find((id) => id !== viewerId);
+	if (!peer) return false;
+	const [viewer] = await sql`select status from users where id = ${viewerId}::bigint`;
+	if (viewer?.status !== "restricted") return true;
+	const [follows] = await sql`select 1 from follows where follower_id = ${peer}::bigint and followee_id = ${viewerId}::bigint`;
+	return !!follows;
 }
 
 async function members(conversationId: string): Promise<string[]> {
@@ -890,6 +905,7 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 	},
 	SendMessageCreateMutation: async (v, vars) => {
 		const conversationId = String(vars.conversation_id ?? "");
+		if (!(await restrictedCanMessage(v.id, conversationId, KIND.message))) throw new ChatError("Your account can't message this recipient.", 326);
 		const all = await joinable(v.id, conversationId);
 		const mce = decodeBlob(vars.encoded_message_create_event);
 		mce[104] = i64(Date.now());
@@ -913,6 +929,7 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 	SendMessageEventMutation: async (v, vars) => {
 		const ev = decodeBlob(vars.encoded_message_event);
 		const conversationId = thrift.text(ev[4]) ?? "";
+		if (!(await restrictedCanMessage(v.id, conversationId, kindOf(ev)))) throw new ChatError("Your account can't send this message.", 326);
 		const all = await joinable(v.id, conversationId);
 		if (![1, 6, 9, 12, 13, 17, 18, 19].includes(kindOf(ev))) throw new ChatError("Use the conversation action for this event.");
 		const { seq } = await stamp(ev, v.id, conversationId);
@@ -923,6 +940,8 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 };
 
 export const knownChatOperation = (name: string) => name in chatHandlers;
+export const restrictedChatOperation = (name: string | undefined) =>
+	name === "SendMessageCreateMutation" || name === "SendMessageEventMutation";
 
 // the browser's way to the Juicebox realm
 export async function juiceboxProxy(req: Request, path: string): Promise<Response> {

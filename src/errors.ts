@@ -64,6 +64,12 @@ export async function clientError(req: Request, viewer: Viewer): Promise<Respons
 // nothing about the server, so they're dropped as the client's own reporter does.
 export const ERROR_SCRIPT = `(function(){
 	var left=10,seen={},offline=/HTTP-0 codes:\\[1004\\]|Failed to fetch|Load failed|NetworkError when attempting to fetch|TypeError: network error/i,resizeLoop=/^ResizeObserver loop completed with undelivered notifications\\.?$/;
+	function restricted(r){
+		if(r.status!==403||location.pathname==="/account/access")return;
+		r.clone().json().then(function(b){
+			if(b&&b.errors&&b.errors.some(function(e){return e&&e.code===326}))location.assign("/account/access");
+		}).catch(function(){});
+	}
 	function send(message,stack){
 		// Chromium reports this when it defers observer work to the next frame;
 		// it is a browser warning, not an uncaught application exception.
@@ -75,4 +81,11 @@ export const ERROR_SCRIPT = `(function(){
 	}
 	window.addEventListener("error",function(e){if(e.error||e.message)send(e.message,e.error&&e.error.stack)});
 	window.addEventListener("unhandledrejection",function(e){var r=e.reason;send(r&&r.message||String(r),r&&r.stack)});
+	var fetch0=window.fetch;
+	window.fetch=function(){var p=fetch0.apply(this,arguments);p.then(restricted,function(){});return p};
+	var open0=XMLHttpRequest.prototype.open;
+	XMLHttpRequest.prototype.open=function(){this.addEventListener("load",function(){
+		if(this.status!==403||location.pathname==="/account/access")return;
+		try{var b=JSON.parse(this.responseText);if(b.errors&&b.errors.some(function(e){return e&&e.code===326}))location.assign("/account/access")}catch(e){}
+	});return open0.apply(this,arguments)};
 })();`;
