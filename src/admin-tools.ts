@@ -475,6 +475,17 @@ export const toolActions: Record<string, Action> = {
 			from media m join users u on u.id = m.user_id ${b.user ? sql`where m.user_id = ${idOf(b.user)}::bigint` : sql``}
 			order by m.id desc limit 60 offset ${Math.max(0, Number(b.offset) || 0)}` }),
 	},
+	// the Media page's search: an account by its handle, local or @name@instance
+	mediaAccount: {
+		role: "support",
+		run: async (_a, b) => {
+			const name = String(b.screen_name ?? "").trim().replace(/^@/, "");
+			if (!name || name.length > 300) throw new AdminError("Enter a handle.");
+			const [u] = await sql`select id::text, screen_name from users where lower(screen_name) = lower(${name})`;
+			if (!u) throw new AdminError(`No account @${name}.`, 404);
+			return u;
+		},
+	},
 	deleteMedia: {
 		role: "moderator",
 		run: async (a, b) => {
