@@ -39,6 +39,7 @@ import { federationRoute, startFederation } from "./federation-routes";
 import { acceptTicket, superadminHomeRoute } from "./superadmin";
 import { gifProxy } from "./gifs";
 import { gifSettingsRoute } from "./gif-settings";
+import { classicDetailRoute, postCounts } from "./classic-detail";
 import { cardImage } from "./explore-cards";
 import { rememberIp, requestIp } from "./login-history";
 import { bucketsFor, hit, isMutation, limitApi, limitedResponse } from "./ratelimit";
@@ -238,6 +239,7 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/badges") return extraBadges(viewer.id, url);
 	if (path === "/xitter/decorations") return decorationsFor(url);
 	if (path === "/xitter/pronouns") return pronounsFor(url);
+	if (path === "/xitter/post-counts") return postCounts(viewer.id, url);
 	if (path === "/xitter/instance") return instanceCard(viewer.id, url);
 	if (path === "/xitter/decor") return decorFor(url);
 	if (path === "/xitter/decor/shop") return decorShop(url);
@@ -460,6 +462,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/oauth/authorize") return oauthAuthorize(req, url, viewer);
 	if (p === "/account/apps" && viewer) return connectedAppsRoute(req, viewer);
 	if (p === "/account/gifs" && viewer) return gifSettingsRoute(req, viewer);
+	if (p === "/account/post-details" && viewer) return classicDetailRoute(req, viewer);
 	if (p === "/account/apps/developer" && viewer) return developerAppsRoute(req, viewer);
 	if (p === "/federation/superadmin" || p.startsWith("/federation/superadmin/")) return superadminHomeRoute(req, url, viewer);
 	if (p === "/account/reset") return resetRoute(req, url);

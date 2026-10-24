@@ -34,6 +34,11 @@ const RULES: [RegExp, string][] = [
 	[/(\w+)=(\w+)\.status\|\|"",(\w+)="Failed"===/g, '$1=$2.status||($2.xitter_conversation_card&&window.__XITTER_CONVERSATION_DRAFT_LABEL__?.($2.xitter_conversation_card))||"",$3="Failed"==='],
 	[/(_handleClick=(\w+)=>\(\)=>\{)(let \w+=\2\.scheduling_info&&\2\.scheduling_info\.execute_at;if\(!this\.isDraftsTab)/g, '$1document.dispatchEvent(new CustomEvent("xitter:restore-conversation-cards",{detail:$2.tweet_create_request}));$3'],
 	[/(_areComposersEmptyOrUnchanged=\(\)=>\{)/g, '$1if(!this.props.isInline&&window.__XITTER_CONVERSATION_HAS_DRAFT__?.())return!1;'],
+	// Settings > Post details, classic (classic-detail.ts): a post's engagements
+	// screen shows its Likes tab, and who liked it, to everyone and not only to
+	// the post's author. isOwnPost itself stays, for what only the author gets.
+	[/([\w$]+)&&([\w$]+)\.push\(([\w$]+)\("likes"\)\)/g, '($1||window.__XITTER__?.classicDetail)&&$2.push($3("likes"))'],
+	[/"likes"!==([\w$]+)\|\|([\w$]+)\?"quotes"===/g, '"likes"!==$1||$2||window.__XITTER__?.classicDetail?"quotes"==='],
 	// Chat is a separate app (module federation): its manifest comes from
 	// chat.x.com, its files from abs.twimg.com, and both are checked by pattern
 	[/https:\/\/chat\.x\.com\/embed-v1\.json/g, `${PUBLIC_ORIGIN}/xchat/embed-v1.json`],
