@@ -1358,6 +1358,9 @@ const RENDER = {
 							(i.key_change ? '<button class="btn" data-key="' + esc(i.id) + '">Accept the new key</button>' : "") + "</div>" : "") + "</article>").join("") + "</div>"
 				: '<div class="empty">No other instances yet.</div>') + "</div>" +
 			(f.instances.length ? '<div class="empty" id="instance-empty" hidden></div>' : "") +
+			'<div class="box" style="margin-top:16px"><h2>Checkmarks from other instances</h2><p class="dim small">' +
+				(f.remote_checkmarks ? "Accounts from other instances wear the checkmark their own instance gave them." : "Accounts from other instances show no checkmark here, whatever their own instance gave them.") + "</p>" +
+				(can("admin") ? '<button class="btn" id="remotechecks">' + (f.remote_checkmarks ? "Hide their checkmarks" : "Show their checkmarks") + "</button>" : "") + "</div>" +
 			'<div class="box" style="margin-top:16px"><h2>Media from other instances</h2><p class="dim small">' +
 				(f.media.stored ? "Saved on this server (FEDERATION_MEDIA=store)." : "Shown straight from their home instance and not saved here.") +
 				" Saved now: " + esc(String(f.media.files)) + " files, " + esc((f.media.bytes / 1048576).toFixed(1)) + " MB.</p>" +
@@ -1375,6 +1378,7 @@ const RENDER = {
 			if (!(await ask("Trust the new key of " + b.dataset.key + "? Only do this if its admins told you they changed it."))) return;
 			act(() => api("federationAcceptKey", { instance: b.dataset.key }), "Key accepted").then(route);
 		});
+		if ($("#remotechecks")) $("#remotechecks").onclick = () => act(() => api("setRemoteCheckmarks", { enabled: !f.remote_checkmarks }), f.remote_checkmarks ? "Their checkmarks are hidden" : "Their checkmarks show again").then(route);
 		if ($("#dropmedia")) $("#dropmedia").onclick = async () => {
 			if (!(await ask("Delete every picture and video saved from other instances? They are fetched from their home instance again when someone views them."))) return;
 			act(() => api("federationDropMedia"), "Deleted").then(route);

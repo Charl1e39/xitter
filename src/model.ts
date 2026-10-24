@@ -43,11 +43,16 @@ export function apiDate(d: Date): string {
 
 const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toString("base64");
 
+// An account from another instance wears the badge that instance gave it,
+// unless this instance stopped showing those (Admin > Federation).
+export const remoteCheckHidden = (u: { instance?: string | null }) => !!u.instance && !settings().remote_checkmarks;
+export const shownVerifiedType = (u: User) => (remoteCheckHidden(u) ? null : u.verified_type);
+
 // Affiliates of an organisation wear X's checkmark next to the organisation's
 // badge, as on X, even without a badge of their own, unless the instance
 // switched that off (Settings: affiliate_checkmarks).
 export const affiliateChecked = (u: User) => !!u.org && feature("affiliate_checkmarks");
-export const isVerified = (u: User) => u.verified_type !== null || affiliateChecked(u);
+export const isVerified = (u: User) => !remoteCheckHidden(u) && (u.verified_type !== null || affiliateChecked(u));
 // a business or government badge: what makes an account an organisation on
 // its own, and gives it a square picture
 export const hasOrgBadge = (u: User) => u.verified_type === "business" || u.verified_type === "government";
@@ -70,13 +75,14 @@ export const pictureShape = (u: User) => (hasOrgBadge(u) ? "Square" : "Circle");
 function verificationInfo(u: User) {
 	if (!isVerified(u)) return { is_identity_verified: false };
 	const instance = settings().instance_name;
+	const type = shownVerifiedType(u);
 	const parts: (string | { text: string; url: string })[] = u.org && affiliateChecked(u)
 		? ["This account is Premium because it’s an affiliate of ", { text: `@${u.org.screen_name}`, url: `${PUBLIC_ORIGIN}/${u.org.screen_name}` }, ` on ${instance}. `]
-		: u.verified_type === "business"
+		: type === "business"
 			? [`This account is verified because it’s an organisation on ${instance}. `]
-			: u.verified_type === "government"
+			: type === "government"
 				? [`This account is verified because it is a government or multilateral organization account on ${instance}. `]
-				: u.verified_type === "government_individual"
+				: type === "government_individual"
 					? [`This account is verified because it belongs to a government or multilateral organization official on ${instance}. `]
 				: [`This account is Premium because the ${instance} team verified it. `];
 	parts.push({ text: "Learn more", url: `${PUBLIC_ORIGIN}/rules` });
@@ -99,8 +105,9 @@ function verificationInfo(u: User) {
 }
 
 function verification(u: User) {
-	if (u.verified_type === "business") return { verified: false, verified_type: "Business" };
-	if (u.verified_type === "government" || u.verified_type === "government_individual") return { verified: false, verified_type: "Government" };
+	const type = shownVerifiedType(u);
+	if (type === "business") return { verified: false, verified_type: "Business" };
+	if (type === "government" || type === "government_individual") return { verified: false, verified_type: "Government" };
 	return { verified: false };
 }
 
@@ -320,8 +327,8 @@ export function legacyUser(u: User) {
 		url: u.website ?? "",
 		pinned_tweet_ids_str: u.pinned_post_id ? [u.pinned_post_id] : [],
 		is_blue_verified: isVerified(u),
-		...(u.verified_type === "business" ? { verified_type: "Business" } : {}),
-		...(u.verified_type === "government" || u.verified_type === "government_individual" ? { verified_type: "Government" } : {}),
+		...(shownVerifiedType(u) === "business" ? { verified_type: "Business" } : {}),
+		...(shownVerifiedType(u) === "government" || shownVerifiedType(u) === "government_individual" ? { verified_type: "Government" } : {}),
 		super_follow_eligible: false,
 		super_followed_by: false,
 		super_following: false,
