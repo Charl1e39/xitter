@@ -217,13 +217,13 @@ function directMembers(id: string): [string, string] | undefined {
 	return m ? [m[1], m[2]] : undefined;
 }
 
-async function restrictedCanMessage(viewerId: string, conversationId: string, kind: number) {
-	const pair = directMembers(conversationId);
-	if (!pair || kind !== KIND.message) return false;
-	const peer = pair.find((id) => id !== viewerId);
-	if (!peer) return false;
+async function restrictedCanMessage(viewerId: string, conversationId: string) {
 	const [viewer] = await sql`select status from users where id = ${viewerId}::bigint`;
 	if (viewer?.status !== "restricted") return true;
+	const pair = directMembers(conversationId);
+	if (!pair) return false;
+	const peer = pair.find((id) => id !== viewerId);
+	if (!peer) return false;
 	const [follows] = await sql`select 1 from follows where follower_id = ${peer}::bigint and followee_id = ${viewerId}::bigint`;
 	return !!follows;
 }
@@ -905,7 +905,7 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 	},
 	SendMessageCreateMutation: async (v, vars) => {
 		const conversationId = String(vars.conversation_id ?? "");
-		if (!(await restrictedCanMessage(v.id, conversationId, KIND.message))) throw new ChatError("Your account can't message this recipient.", 326);
+		if (!(await restrictedCanMessage(v.id, conversationId))) throw new ChatError("Your account can't message this recipient.", 326);
 		const all = await joinable(v.id, conversationId);
 		const mce = decodeBlob(vars.encoded_message_create_event);
 		mce[104] = i64(Date.now());
@@ -929,7 +929,7 @@ export const chatHandlers: Record<string, (viewer: Viewer, vars: Vars) => Promis
 	SendMessageEventMutation: async (v, vars) => {
 		const ev = decodeBlob(vars.encoded_message_event);
 		const conversationId = thrift.text(ev[4]) ?? "";
-		if (!(await restrictedCanMessage(v.id, conversationId, kindOf(ev)))) throw new ChatError("Your account can't send this message.", 326);
+		if (!(await restrictedCanMessage(v.id, conversationId))) throw new ChatError("Your account can't send this message.", 326);
 		const all = await joinable(v.id, conversationId);
 		if (![1, 6, 9, 12, 13, 17, 18, 19].includes(kindOf(ev))) throw new ChatError("Use the conversation action for this event.");
 		const { seq } = await stamp(ev, v.id, conversationId);
