@@ -7,6 +7,31 @@ import { dirname, join, normalize } from "node:path";
 export const CLIENT_DIR = process.env.CLIENT_DIR ?? "client";
 export const CDN_ORIGIN = "https://abs.twimg.com";
 const downloads = new Map<string, Promise<Buffer | undefined>>();
+// /abs/ answers before sign-in, so what it will fetch and keep is the
+// client's own: its bundle, its stock images and the chat app, each a bounded size
+const FETCHED = /^\/(responsive-web\/|sticky\/|x-web\/xchat\/)/;
+const MAX_FILE = 32 * 1024 * 1024;
+
+// (federation.ts has one too, but importing it would bring the database into
+// the client fetcher script)
+async function readLimited(r: Response, max: number): Promise<Uint8Array> {
+	if (Number(r.headers.get("content-length") ?? 0) > max) throw new Error("too large");
+	const reader = r.body?.getReader();
+	if (!reader) return new Uint8Array();
+	const parts: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.length;
+		if (size > max) {
+			await reader.cancel();
+			throw new Error("too large");
+		}
+		parts.push(value);
+	}
+	return Buffer.concat(parts);
+}
 
 function localPath(cdnPath: string): string | undefined {
 	const clean = normalize(cdnPath).replace(/^([/\\])+/, "");
@@ -25,13 +50,14 @@ export async function getClientFile(cdnPath: string, allowFetch = true): Promise
 	const cached = readCached(cdnPath);
 	if (cached || !allowFetch) return cached;
 	const p = localPath(cdnPath);
-	if (!p || (existsSync(p) && !statSync(p).isFile())) return undefined;
+	if (!p || (existsSync(p) && !statSync(p).isFile()) || !FETCHED.test(cdnPath)) return undefined;
 	let pending = downloads.get(p);
 	if (!pending) {
 		pending = (async () => {
 			const res = await fetch(CDN_ORIGIN + cdnPath);
 			if (!res.ok) return undefined;
-			const buf = Buffer.from(await res.arrayBuffer());
+			const buf = Buffer.from(await readLimited(res, MAX_FILE).catch(() => new Uint8Array()));
+			if (!buf.length) return undefined;
 			mkdirSync(dirname(p), { recursive: true });
 			writeFileSync(p, buf);
 			return buf;

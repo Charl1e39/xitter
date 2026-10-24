@@ -14,7 +14,7 @@ import type { Viewer } from "./auth";
 import { remoteMediaFile } from "./federation-sync";
 import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { blockedFor, protectedFor, suspendedFor } from "./blocks";
-import { staffViewer } from "./staff-access";
+import { isStaffRequest, staffViewer } from "./staff-access";
 import { sql } from "./db";
 import { isId, newId } from "./ids";
 import { settings } from "./settings";
@@ -650,7 +650,22 @@ async function cacheFor(viewer: Viewer, served: Served): Promise<string | undefi
 		// policy. Their URL may later be attached to private content.
 		const [profile] = await sql`select 1 from users where id = ${served.owner}::bigint
 			and (avatar_url = ${`/media/${served.id}`} or banner_url = ${`/media/banner/${served.id}`})`;
-		return profile ? REVALIDATE : PRIVATE;
+		if (profile) return REVALIDATE;
+		// Anything else not in a post is its owner's (a draft's or scheduled
+		// post's, one the composer just took) unless something shows it to others:
+		// a list's or community's banner, or a published article. Ids are times,
+		// so they can be guessed.
+		if (served.owner === viewer.id || isStaffRequest()) return PRIVATE;
+		const [shown] = await sql`select 1 where
+			exists (select 1 from delegation_members d where d.owner_id = ${served.owner}::bigint and d.member_id = ${viewer.id}::bigint and d.status = 'Accepted')
+			or exists (select 1 from lists l where l.banner_media_id = ${served.id}::bigint
+				and (l.owner_id = ${viewer.id}::bigint or (not l.is_private and l.owner_id not in ${blockedFor(viewer.id)})))
+			or exists (select 1 from communities c where c.banner_url = ${`/media/${served.id}`})
+			or exists (select 1 from articles a join posts post on post.article_id = a.id
+				where a.user_id = ${served.owner}::bigint and a.state = 'Published' and not a.hidden and not post.hidden
+					and (a.cover_media_id = ${served.id}::bigint or a.content_state::text like ${`%${served.id}%`})
+					and post.user_id not in ${protectedFor(viewer.id)} and post.user_id not in ${suspendedFor(viewer.id)} and post.user_id not in ${blockedFor(viewer.id)})`;
+		return shown ? PRIVATE : undefined;
 	}
 	const [access] = await sql`select not post.hidden and not author.protected as open from posts post join users author on author.id = post.user_id where
 		${served.post ? sql`post.id = ${served.post}::bigint` : sql`post.poll_id = any(${sql.array(pollIds, "INT8")})`}

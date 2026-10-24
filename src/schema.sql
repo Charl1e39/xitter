@@ -80,6 +80,8 @@ alter table users add column if not exists totp_enabled boolean not null default
 alter table users add column if not exists totp_secret text;
 alter table users add column if not exists totp_pending text;
 alter table users add column if not exists totp_backup jsonb not null default '[]';
+-- the time step of the last code taken, so each code signs in once (two-factor.ts)
+alter table users add column if not exists totp_last_step bigint;
 create table if not exists login_challenges (
 	token uuid primary key,
 	user_id bigint not null references users (id) on delete cascade,

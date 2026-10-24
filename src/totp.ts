@@ -32,13 +32,16 @@ export function codeAt(secret: string, step: number): string {
 	return String(n % 1_000_000).padStart(6, "0");
 }
 
-// the current step and one either side, for clocks that drift
-export function verifyCode(secret: string, code: string, now = Date.now()): boolean {
+// the current step and one either side, for clocks that drift; the step the
+// code belongs to, so it can be taken once (two-factor.ts)
+export function matchedStep(secret: string, code: string, now = Date.now()): number | undefined {
 	const clean = code.replace(/[\s-]/g, "");
-	if (!/^\d{6}$/.test(clean)) return false;
+	if (!/^\d{6}$/.test(clean)) return undefined;
 	const step = Math.floor(now / 30000);
-	return [-1, 0, 1].some((d) => codeAt(secret, step + d) === clean);
+	return [-1, 0, 1].map((d) => step + d).find((s) => codeAt(secret, s) === clean);
 }
+
+export const verifyCode = (secret: string, code: string, now = Date.now()) => matchedStep(secret, code, now) !== undefined;
 
 export const otpauthUrl = (secret: string, account: string, issuer: string) =>
 	`otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;

@@ -19,6 +19,7 @@ import { orgRoute } from "./org-manage";
 import { menuLinks } from "./tidy";
 import { isPlayerPage, playerPage } from "./player-card";
 import { chatMediaRoute, chatSocket, juiceboxProxy, socketUser } from "./chat";
+import { sweepChatUploads } from "./chat-media";
 import { loadBuild } from "./build";
 import { MEDIA_DIR, mediaUpload, serveMedia } from "./media";
 import { resumeVideos } from "./video";
@@ -310,6 +311,15 @@ setInterval(
 			recordError("job", e, { path: "shop checkmark expiry" });
 		}),
 	10 * 60_000,
+).unref();
+// abandoned and expired chat attachments give their disk back
+setInterval(
+	() =>
+		sweepChatUploads().catch((e) => {
+			console.error("chat upload sweep failed", e.message);
+			recordError("job", e, { path: "chat upload sweep" });
+		}),
+	60 * 60_000,
 ).unref();
 await loadSettings();
 await resumeVideos(MEDIA_DIR);
