@@ -90,6 +90,9 @@ const DEFAULTS = {
 	// the admin panel itself (admin.ts staffGate): staff must have two-factor on;
 	// only these addresses (IPs or CIDR ranges) reach it, none meaning any
 	security: { staff_2fa: false, admin_ips: [] as string[] },
+	// Admin > Federation: show the checkmarks other instances gave their accounts
+	// (model.ts shownVerifiedType); off, they look unverified here
+	remote_checkmarks: true,
 	// backups.ts: a database dump every day, the newest `keep` kept
 	backups: { daily: false, keep: 7 },
 	// member-invites.ts: invites members make themselves, while sign-up is by invite
