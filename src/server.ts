@@ -43,7 +43,7 @@ import { gifSettingsRoute } from "./gif-settings";
 import { circleRoute } from "./circles";
 import { cardImage } from "./explore-cards";
 import { rememberIp, requestIp } from "./login-history";
-import { bucketsFor, hit, isMutation, limitApi, limitedResponse } from "./ratelimit";
+import { hit, isMutation, limitApi, limitedResponse } from "./ratelimit";
 import { actingViewer, delegateMay } from "./delegation";
 import { automationRoute } from "./automation";
 import { instancesRoute } from "./federation-settings";
@@ -74,6 +74,7 @@ import { forgetRanking } from "./ranking";
 import { cardsApi, payMeApi, recentApi } from "./money";
 import { merchantRoute, moneyRoute } from "./money-page";
 import { expireShopCheckmarks } from "./money-shop";
+import { restrictedPage, restrictedRefuses } from "./restricted-page";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -235,6 +236,8 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 		if (!delegateMay(acting.actor!.role, req.method, path, operation)) return apiError(403, 200, "Delegates can't do this for the account.");
 		viewer = acting;
 	}
+	if (viewer.status === "restricted" && restrictedRefuses(req.method, path, operation, url))
+		return apiError(403, 326, "Your account can't interact right now.");
 	// a follow, block, mute or like changes what "For you" would rank
 	if (req.method !== "GET") forgetRanking(viewer.id);
 	const limited = limitApi(viewer, req.method, path, operation, url);
@@ -256,8 +259,6 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/money/recent") return recentApi(viewer);
 	if (path === "/xitter/money/payme" && req.method === "POST") return payMeApi(viewer);
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
-	if (viewer.status === "restricted" && bucketsFor(req.method, path, operation, url).some((b) => b === "post" || b === "dm"))
-		return apiError(403, 326, "Your account can't post or send messages right now.");
 	if (req.method !== "GET" && !/^\/(i|1\.1)\/media\/upload2?\.json$/.test(path) && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY)
 		return apiError(413, 324, "That request is too large.");
 	if (process.env.LOG_REQUESTS) console.log(`api ${req.method} ${gql >= 0 ? `graphql:${parts[parts.length - 1]}` : path}`);
@@ -451,6 +452,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (viewer?.role && !(await staffGate(req, viewer))) markStaff();
 	// a suspended account can't sign in, so it appeals here with its password
 	if (p === "/appeal") return appealRoute(req, server.requestIP(req)?.address ?? "");
+	if (p === "/account/access" && viewer?.status === "restricted") return restrictedPage(req, viewer);
 	// maintenance: staff carry on, everyone else signed in waits
 	if (viewer && !viewer.role && settings().operations.maintenance) {
 		if (API_PREFIX.test(p) || req.method !== "GET") return apiError(503, 130, settings().operations.message);
