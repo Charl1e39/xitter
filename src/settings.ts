@@ -95,8 +95,9 @@ const DEFAULTS = {
 	// Admin > Federation: show the checkmarks other instances gave their accounts
 	// (model.ts shownVerifiedType); off, they look unverified here
 	remote_checkmarks: true,
-	// backups.ts: a database dump every day, the newest `keep` kept
-	backups: { daily: false, keep: 7 },
+	// backups.ts: while `daily` is on, a database dump every `every_hours` (one
+	// of BACKUP_INTERVALS), the newest `keep` kept
+	backups: { daily: false, keep: 7, every_hours: 24 },
 	// member-invites.ts: invites members make themselves, while sign-up is by invite
 	invite_quota: { enabled: false, per_month: 3, uses: 1, min_age_days: 7 },
 	// archive-import.ts: who may import from X, while the feature is on; staff skip both
