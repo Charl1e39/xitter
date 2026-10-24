@@ -378,7 +378,7 @@ const createTweet: Handler = async (viewer, vars) => {
 		return { data: { create_tweet: { tweet_results: { result: tweetResult((await getPost(viewer.id, previous))!, false) } } } };
 	}
 	if (replyTo !== undefined && !isId(replyTo)) throw new PostError("Invalid post id.", 144);
-	id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource, communityId, placeId: placeById(vars.geo?.place_id) ? vars.geo.place_id : undefined, replyPolicy: vars.conversation_control?.mode, replySelections: vars.conversation_control?.allowed_country_codes });
+	id = await createPost(viewer.id, text, { replyToId: replyTo, quoteId, source: viewer.postSource, communityId, placeId: placeById(vars.geo?.place_id) ? vars.geo.place_id : undefined, replyPolicy: vars.conversation_control?.mode, replySelections: vars.conversation_control?.allowed_country_codes, circle: !!vars.exclusive_tweet_control_options && typeof vars.exclusive_tweet_control_options === "object" });
 	if (sharedConversation) {
 		try {
 			await sql`update posts set conversation_card_post_id = ${sharedConversation.id}::bigint, sensitive = ${!!sharedConversation.sensitive} where id = ${id}::bigint`;

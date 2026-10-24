@@ -1643,6 +1643,7 @@ const RENDER = {
 			$("#list").innerHTML = posts.length
 				? '<table class="table"><tr>' + (pickable ? '<th style="width:32px"></th>' : "") + '<th>Post</th><th>Author</th><th>When</th><th></th></tr>' +
 					posts.map((p) => "<tr>" + (pickable ? '<td><input type="checkbox" data-ppick="' + esc(p.id) + '"></td>' : "") + "<td>" + (p.reply_to_id ? '<span class="dim small">reply · </span>' : "") + esc(p.text || "(no text)") + (p.media ? ' <span class="dim small">· ' + p.media + " media</span>" : "") +
+						(p.circle_owner ? ' <span class="pill" title="Only people in @' + esc(p.circle_owner) + '&#39;s Circle can see this post">Circle</span>' : "") +
 						(p.hidden ? ' <span class="pill suspended">hidden</span>' : "") + (p.sensitive ? ' <span class="pill restricted">sensitive</span>' : "") +
 						(p.notice ? ' <span class="pill restricted">' + esc(NOTICE_LABELS[p.notice.type] || p.notice.type) + "</span>" : "") + (p.count_overrides ? ' <span class="pill">counts set</span>' : "") +
 						'<div class="dim small">' + p.likes + ' likes · <a href="/' + esc(p.screen_name) + "/status/" + esc(p.id) + '" target="_blank">open</a></div></td><td><a href="#user/' + esc(p.user_id) + '">@' + esc(p.screen_name) + '</a></td><td class="small dim">' + esc(when(p.created_at)) + "</td><td>" +
@@ -1782,7 +1783,7 @@ const RENDER = {
 			'<div class="field"><label>Source code link (AGPL-3.0: shown on the sign-in pages)</label><input id="source" value="' + esc(s.source_url) + '"' + dis + "></div>" +
 			(admin ? '<button class="btn primary" id="saveName">Save</button>' : "") + "</div>" +
 			[
-				["Core social", ["communities", "lists"]],
+				["Core social", ["communities", "lists", "circles"]],
 				["Composer", ["gifs", "polls", "location", "scheduling"]],
 				["AI and tools", ["grok", "image_gen", "premium", "calls", "history", "creator_studio", "spaces"]],
 				["Accounts and integrations", ["business", "notes_everyone", "link_previews", "archive_import", "money", "affiliate_checkmarks"]],

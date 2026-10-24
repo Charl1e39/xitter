@@ -5,6 +5,7 @@ import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { vapidPublicKey } from "./push";
 import { settings } from "./settings";
 import { patchCountryAudience } from "./reply-control-client";
+import { patchCircleComposer } from "./circles";
 
 // X's VAPID public key, which the client subscribes to push with; pushes can
 // only be signed with the private half, so the instance's own goes in its place
@@ -153,6 +154,7 @@ export function patchText(text: string, chat = false): string {
 	let re: RegExp, to: string;
 	for ([re, to] of chat ? [...CHAT_RULES, ...RULES] : RULES) out = out.replace(re, to);
 	out = patchCountryAudience(out);
+	out = patchCircleComposer(out);
 	if (!out.includes("ConversationControlsQuery")) return out;
 	// newer clients pass more props between options and value (requiresSelection:n=!1)
 	return out.replace(/function [\w$]+\(\{onApply:[\w$]+,onBack:[\w$]+,options:([\w$]+),(?:[\w$]+:[\w$]+(?:=[\w$!.]{1,20})?,){0,4}value:[\w$]+\}\)\{let\[[\w$]+,[\w$]+\]=([\w$]+)\.useState\([\s\S]{0,16000}?(?=let [\w$]+=[\w$]+\.A\.create)/g, (picker, options, react) => {

@@ -385,6 +385,8 @@ export type PostRow = {
 	media?: MediaRow[];
 	article_id?: string | null;
 	community_id?: string | null;
+	// the Circle a post is in (circles.ts)
+	circle_owner?: { id: string; screen_name: string } | null;
 	poll_id?: string | null;
 	place_id?: string | null;
 	edit_count?: number;
@@ -608,6 +610,20 @@ function plainTweet(p: PostRow, withTypename: boolean): Record<string, unknown> 
 			user_id_str: p.author.id,
 		},
 		rest_id: p.id,
+		// "Only people in @owner's Circle can see this post"; the client reads the owner's handle
+		...(p.circle_owner
+			? {
+					trusted_friends_info_result: {
+						__typename: "ApiTrustedFriendsInfo",
+						owner_results: {
+							result:
+								p.circle_owner.id === p.author.id
+									? userResult(p.author)
+									: { __typename: "User", id: globalId("User", p.circle_owner.id), rest_id: p.circle_owner.id, core: { screen_name: p.circle_owner.screen_name, name: p.circle_owner.screen_name }, legacy: { screen_name: p.circle_owner.screen_name, name: p.circle_owner.screen_name } },
+						},
+					},
+				}
+			: {}),
 		unmention_data: {},
 		unmention_info: {},
 		views: p.view_count ? { count: String(p.view_count), state: "EnabledWithCount" } : { state: "Enabled" },

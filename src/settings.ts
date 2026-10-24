@@ -28,6 +28,7 @@ export const FEATURES = {
 	link_previews: "Previews of public posts and profiles when their links are shared in other apps",
 	archive_import: "Import from X: accounts upload their X archive and its posts come over (Settings > Your account)",
 	money: "Equicoins: accounts send each other money from the side bar (the instance's own play money, not real currency)",
+	circles: "Circles: posts only the people an account picks can see (Circle instead of Everyone in the composer)",
 	affiliate_checkmarks: "Checkmarks for affiliates of an organisation (off: they keep the organisation's badge, and only a checkmark of their own shows)",
 } as const;
 export type Feature = keyof typeof FEATURES;
@@ -54,6 +55,7 @@ const DEFAULTS = {
 		link_previews: true,
 		archive_import: false,
 		money: false,
+		circles: true,
 		affiliate_checkmarks: true,
 	} as Record<Feature, boolean>,
 	limits: { image_mb: 5, video_mb: Number(process.env.MAX_VIDEO_MB ?? 200), video_seconds: Number(process.env.MAX_VIDEO_SECONDS ?? 600) },

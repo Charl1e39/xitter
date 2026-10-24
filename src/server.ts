@@ -40,6 +40,7 @@ import { federationRoute, startFederation } from "./federation-routes";
 import { acceptTicket, superadminHomeRoute } from "./superadmin";
 import { gifProxy } from "./gifs";
 import { gifSettingsRoute } from "./gif-settings";
+import { circleRoute } from "./circles";
 import { cardImage } from "./explore-cards";
 import { rememberIp, requestIp } from "./login-history";
 import { bucketsFor, hit, isMutation, limitApi, limitedResponse } from "./ratelimit";
@@ -464,6 +465,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (p === "/oauth/authorize") return oauthAuthorize(req, url, viewer);
 	if (p === "/account/apps" && viewer) return connectedAppsRoute(req, viewer);
 	if (p === "/account/gifs" && viewer) return gifSettingsRoute(req, viewer);
+	if (p === "/account/circle" && viewer) return circleRoute(req, viewer);
 	if (p === "/account/apps/developer" && viewer) return developerAppsRoute(req, viewer);
 	if (p === "/federation/superadmin" || p.startsWith("/federation/superadmin/")) return superadminHomeRoute(req, url, viewer);
 	if (p === "/account/reset") return resetRoute(req, url);

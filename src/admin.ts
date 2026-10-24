@@ -662,6 +662,7 @@ const ACTIONS: Record<string, Action> = {
 			const author = String(b.author ?? "").trim().replace(/^@/, "");
 			const match = sql`(${q} = '' or p.text ilike ${like(q)}) and (${author} = '' or lower(u.screen_name) = lower(${author}))`;
 			const rows = await sql`select p.id::text as id, p.text, p.created_at, p.hidden, p.sensitive, p.notice, p.count_overrides, p.reply_to_id::text as reply_to_id, u.id::text as user_id, u.screen_name, u.name,
+				(select c.screen_name from users c where c.id = p.circle_owner_id) as circle_owner,
 				(select count(*)::int from likes l where l.post_id = p.id) as likes,
 				(select count(*)::int from media m where m.post_id = p.id) as media
 				from posts p join users u on u.id = p.user_id
