@@ -16,7 +16,7 @@ import { type MediaRow, absolute, mediaEntity, mediaUrl, posterUrl } from "./med
 import { placeById } from "./places";
 import { shownSource } from "./platforms";
 import { requestLanguage } from "./staff-access";
-import { settings } from "./settings";
+import { feature, settings } from "./settings";
 import { SHORT_POST, previewOf, weightedLength } from "./textlen";
 import { badgeUrl } from "./users";
 
@@ -44,8 +44,10 @@ export function apiDate(d: Date): string {
 const globalId = (kind: string, id: string) => Buffer.from(`${kind}:${id}`).toString("base64");
 
 // Affiliates of an organisation wear X's checkmark next to the organisation's
-// badge, as on X, even without a badge of their own.
-export const isVerified = (u: User) => u.verified_type !== null || !!u.org;
+// badge, as on X, even without a badge of their own, unless the instance
+// switched that off (Settings: affiliate_checkmarks).
+export const affiliateChecked = (u: User) => !!u.org && feature("affiliate_checkmarks");
+export const isVerified = (u: User) => u.verified_type !== null || affiliateChecked(u);
 // a business or government badge: what makes an account an organisation on
 // its own, and gives it a square picture
 export const hasOrgBadge = (u: User) => u.verified_type === "business" || u.verified_type === "government";
@@ -53,7 +55,7 @@ export const hasOrgBadge = (u: User) => u.verified_type === "business" || u.veri
 // (isOrganizationSql in users.ts is the same rule in SQL)
 export const isOrganization = (u: User) => hasOrgBadge(u) || !!u.affiliates;
 // "Verified since": an affiliate's date of joining its organisation, else when the badge was given
-export const verifiedSince = (u: User): Date | null => (u.org?.since ? new Date(u.org.since) : u.verified_at ? new Date(u.verified_at) : null);
+export const verifiedSince = (u: User): Date | null => (affiliateChecked(u) && u.org?.since ? new Date(u.org.since) : u.verified_at ? new Date(u.verified_at) : null);
 
 // X has two globes: "badged" (blue) and "moderator" (yellow). Approvers get the
 // yellow one; translator moderators the same, which badges.ts colours gold.
@@ -68,7 +70,7 @@ export const pictureShape = (u: User) => (hasOrgBadge(u) ? "Square" : "Circle");
 function verificationInfo(u: User) {
 	if (!isVerified(u)) return { is_identity_verified: false };
 	const instance = settings().instance_name;
-	const parts: (string | { text: string; url: string })[] = u.org
+	const parts: (string | { text: string; url: string })[] = u.org && affiliateChecked(u)
 		? ["This account is Premium because it’s an affiliate of ", { text: `@${u.org.screen_name}`, url: `${PUBLIC_ORIGIN}/${u.org.screen_name}` }, ` on ${instance}. `]
 		: u.verified_type === "business"
 			? [`This account is verified because it’s an organisation on ${instance}. `]
