@@ -419,6 +419,7 @@ create table if not exists audit_log (
 	created_at timestamptz not null default now()
 );
 create index if not exists audit_log_created_idx on audit_log (created_at desc);
+create index if not exists audit_log_action_idx on audit_log (action);
 -- organisations are business accounts; affiliates show the org's badge
 create table if not exists affiliations (
 	org_id bigint not null references users (id) on delete cascade,

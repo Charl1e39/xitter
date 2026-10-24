@@ -137,6 +137,7 @@ const ACTIONS: Record<string, Action> = {
 			media: { stored: storesRemoteMedia(), ...(await savedRemoteMedia()) },
 			registry: { sequence: registrySequence(), checked_at: registryCheckedAt ? new Date(registryCheckedAt).toISOString() : null, error: registryError },
 			outbox_head: head,
+			remote_checkmarks: settings().remote_checkmarks,
 			superadmins: SUPERADMINS.map((x) => `${x.screen_name}@${x.instance}`),
 			superadmin: !!a.superadmin,
 			instances: await Promise.all(
@@ -200,6 +201,12 @@ const ACTIONS: Record<string, Action> = {
 		const dropped = await dropRemoteMedia();
 		await audit(a, "federation_drop_media", INSTANCE_ID, dropped);
 		return dropped;
+	} },
+	setRemoteCheckmarks: { role: "admin", run: async (a, b) => {
+		if (typeof b.enabled !== "boolean") throw new AdminError("Provide a boolean setting.");
+		await setSetting("remote_checkmarks", b.enabled);
+		await audit(a, "set_remote_checkmarks", INSTANCE_ID, { enabled: b.enabled });
+		return {};
 	} },
 	federationPull: { role: "admin", run: async (a, b) => {
 		const id = instanceOf(b.instance);
@@ -914,8 +921,11 @@ const ACTIONS: Record<string, Action> = {
 					left join users t on l.target ~ '^[0-9]+$' and t.id = l.target::bigint
 					where ${action ? sql`l.action = ${action}` : sql`true`} and ${b.automatic ? sql`l.actor_id is null` : sql`true`}
 						and ${who ? sql`lower(t.screen_name) = lower(${who})` : sql`true`}`;
+			// the filter offers what the log holds: actions are logged from all over, and a fixed list misses some
+			const actions = await sql`select distinct action from audit_log order by action`;
 			return {
 				total: Number(total[0]?.total ?? 0),
+				actions: actions.map((r: { action: string }) => r.action),
 				entries: await sql`select l.id::text as id, l.action, l.target, l.detail, l.created_at, a.screen_name as actor, l.actor_id is null as automatic,
 					t.screen_name as target_name
 					from audit_log l left join users a on a.id = l.actor_id
@@ -941,7 +951,7 @@ for (const [key, p] of Object.entries(PERMISSIONS))
 		if (ACTIONS[name]?.role !== p.role) throw new Error(`Staff permission ${key}: ${name} ${ACTIONS[name] ? `needs ${ACTIONS[name].role}, not ${p.role}` : "is no action"}.`);
 
 const READS = new Set(
-	"federation platforms mail cards topics me staffPermissions stats users user orgs affiliates posts reports invites settings audit badges labels staffNotes staffMessages appeals handleHistory userSessions blockedNameAccounts articles media operations heldIdentities health security backups archiveImports client checkClient errors inviteTree featureSwitches hashflags oauthApps stickers automodScan money".split(
+	"federation platforms mail cards topics me staffPermissions stats users user orgs affiliates posts reports invites settings audit badges labels staffNotes staffMessages appeals handleHistory userSessions blockedNameAccounts articles media mediaAccount operations heldIdentities updateStatus health security backups archiveImports client checkClient errors inviteTree featureSwitches hashflags oauthApps stickers automodScan money".split(
 		" ",
 	),
 );

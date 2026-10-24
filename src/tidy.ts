@@ -151,6 +151,7 @@ export function tidyData(links: MenuLink[] = []) {
 			: null,
 		instance: s.instance_name,
 		source: s.source_url,
+		signup: s.signup_mode !== "closed",
 		links,
 	};
 }
@@ -547,14 +548,26 @@ export const TIDY_SCRIPT = `(function(){
 			if(T.menuItems.indexOf(m.innerText.trim())>=0)m.style.display="none";
 		});
 		// signed out on a phone, X's page leads with "Get the app", which opens X's
-		// own app or its store page and looks like being sent to x.com; here
-		// signing in is the way in, so its link takes the button's place
+		// own app or its store page and looks like being sent to x.com. Where
+		// sign-up is open, a "Create account" button takes its place and opens the
+		// sign-in dialog, where a new username starts sign-up (onboarding.ts);
+		// where it's closed, signing in is the way in, so its link does
 		document.querySelectorAll("button").forEach(function(b){
 			if(b.innerText.trim()!=="Get the app"||b.style.display==="none")return;
 			b.style.display="none";
 			var box=b.parentElement;
 			while(box&&!box.querySelector('a[href="/i/flow/login"]'))box=box.parentElement;
 			if(!box)return;
+			if(T.signup){
+				var c=b.cloneNode(true);
+				c.style.display="";
+				c.setAttribute("data-xitter-signup","");
+				c.querySelectorAll("span").forEach(function(n){if(!n.childElementCount&&n.textContent.trim()==="Get the app")n.textContent="Create account"});
+				// X's own handler stays on the hidden button; this one opens the dialog in place
+				c.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();box.querySelector('a[href="/i/flow/login"]').click()});
+				b.after(c);
+				return;
+			}
 			box.querySelectorAll("span").forEach(function(n){if(n.innerText.trim()==="Already have an account?")n.style.display="none"});
 			var a=box.querySelector('a[href="/i/flow/login"]');
 			a.style.backgroundColor="#eff3f4";a.style.borderColor="#eff3f4";
