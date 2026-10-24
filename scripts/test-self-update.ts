@@ -1,5 +1,5 @@
 // Admin > Server update (self-update.ts): which repositories and branches an
-// admin's input names, and SELF_UPDATE_REPOS.
+// admin's input names, and which ones SELF_UPDATE_REPOS allows.
 import { expect, test } from "bun:test";
 import { parseRepo, repoAllowed, validBranch } from "../src/self-update";
 
@@ -16,17 +16,25 @@ test("branch names git takes and that aren't options", () => {
 	for (const bad of ["", "-f", "--upload-pack=x", "a..b", "a//b", "a/", "a.lock", "a/.b", "x@{1}", "a b", "a;b"]) expect(validBranch(bad)).toBe(false);
 });
 
-test("SELF_UPDATE_REPOS limits the repositories, in any case", () => {
-	const before = process.env.SELF_UPDATE_REPOS;
+test("only the update repository unless SELF_UPDATE_REPOS says otherwise", () => {
+	const before = { repos: process.env.SELF_UPDATE_REPOS, update: process.env.UPDATE_REPO };
 	try {
 		delete process.env.SELF_UPDATE_REPOS;
-		expect(repoAllowed("anyone/anything")).toBe(true);
+		delete process.env.UPDATE_REPO;
+		expect(repoAllowed("xittered/xitter")).toBe(true);
+		expect(repoAllowed("anyone/anything")).toBe(false);
+		process.env.UPDATE_REPO = "me/fork";
+		expect(repoAllowed("me/fork")).toBe(true);
+		expect(repoAllowed("Xittered/xitter")).toBe(false);
 		process.env.SELF_UPDATE_REPOS = "Xittered/xitter, me/fork";
 		expect(repoAllowed("xittered/XITTER")).toBe(true);
-		expect(repoAllowed("me/fork")).toBe(true);
 		expect(repoAllowed("someone/else")).toBe(false);
+		process.env.SELF_UPDATE_REPOS = "*";
+		expect(repoAllowed("someone/else")).toBe(true);
 	} finally {
-		if (before === undefined) delete process.env.SELF_UPDATE_REPOS;
-		else process.env.SELF_UPDATE_REPOS = before;
+		for (const [key, value] of [["SELF_UPDATE_REPOS", before.repos], ["UPDATE_REPO", before.update]] as const) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
 	}
 });

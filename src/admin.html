@@ -653,6 +653,8 @@ const RENDER = {
 		const u = await api("selfUpdate");
 		const short = (sha) => sha ? sha.slice(0, 12) : "none";
 		const last = u.last;
+		const firstRepo = u.allowed_repos === "*" ? "Xittered/xitter" : u.allowed_repos[0];
+		const proof = () => ({ password: $("#upass").value, code: $("#ucode").value });
 		const going = last && (last.state === "running" || last.state === "restarting");
 		const stateText = { running: "Running", restarting: "Restarting", done: "Done", failed: "Failed" };
 		const off = !u.enabled
@@ -664,12 +666,16 @@ const RENDER = {
 			'<div class="cards"><div class="card"><span>Running</span><b class="code">' + esc(short(u.commit)) + "</b></div>" +
 			'<div class="card"><span>Previous</span><b class="code">' + esc(short(u.previous?.sha)) + "</b>" + (u.previous ? '<span class="small dim">on ' + esc(u.previous.branch) + "</span>" : "") + "</div></div>" +
 			(u.enabled && u.checkout ? '<div class="box" style="margin:16px 0"><h2>Update from</h2><div class="row">' +
-				'<input id="urepo" placeholder="Xittered/xitter" aria-label="GitHub repository" value="' + esc(last?.kind === "update" ? last.repo : "Xittered/xitter") + '" style="flex:2;min-width:220px">' +
+				'<input id="urepo" placeholder="' + esc(firstRepo) + '" aria-label="GitHub repository" value="' + esc(last?.kind === "update" ? last.repo : firstRepo) + '" style="flex:2;min-width:220px">' +
 				'<input id="ubranch" placeholder="Default branch" aria-label="Branch" value="' + esc(last?.kind === "update" ? last.branch ?? "" : "") + '" style="flex:1;min-width:140px">' +
+				"</div>" +
+				'<p class="dim small">A repository like <span class="code">owner/name</span> or its github.com address. Leave the branch blank for the repository\'s default. ' +
+				(u.allowed_repos === "*" ? "Any GitHub repository is allowed here." : "This instance updates only from " + u.allowed_repos.map((r) => '<span class="code">' + esc(r) + "</span>").join(", ") + "; the owner names others with <span class=\"code\">SELF_UPDATE_REPOS</span>.") + "</p>" +
+				'<div class="row" style="margin-top:12px"><input id="upass" type="password" autocomplete="current-password" placeholder="Your password" aria-label="Your password" style="flex:1;min-width:160px">' +
+				'<input id="ucode" inputmode="numeric" autocomplete="one-time-code" placeholder="Two-factor code" aria-label="Two-factor code" style="flex:1;min-width:140px">' +
 				'<button class="btn primary" id="ugo"' + (going ? " disabled" : "") + ">Update</button>" +
 				(u.previous ? '<button class="btn" id="uback"' + (going ? " disabled" : "") + ">Go back to " + esc(short(u.previous.sha)) + "</button>" : "") + "</div>" +
-				'<p class="dim small">A repository like <span class="code">owner/name</span> or its github.com address. Leave the branch blank for the repository\'s default.' +
-				(u.allowed_repos.length ? " This instance updates only from " + u.allowed_repos.map((r) => '<span class="code">' + esc(r) + "</span>").join(", ") + "." : "") + "</p></div>" : "") +
+				'<p class="dim small">Updating and going back take your password and a two-factor code again.</p></div>' : "") +
 			(last ? '<div class="box"><h2>' + (last.kind === "rollback" ? "Last time going back" : "Last update") + ": " + esc(stateText[last.state] ?? last.state) + "</h2>" +
 				'<p class="dim small">' + (last.kind === "update" ? esc(last.repo) + (last.branch ? " (" + esc(last.branch) + ")" : "") + ", " : "") +
 				"by @" + esc(last.by) + ", " + esc(when(last.started_at)) + (last.from ? ", " + esc(short(last.from)) + " → " + esc(short(last.to)) : "") +
@@ -677,14 +683,14 @@ const RENDER = {
 				(last.error ? '<p style="color:var(--red)">' + esc(last.error) + "</p>" : "") +
 				'<pre class="code" style="max-height:420px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px">' + esc(last.log.join("\n")) + "</pre></div>" : "");
 		if ($("#ugo")) $("#ugo").onclick = async () => {
-			const repo = $("#urepo").value.trim() || "Xittered/xitter";
+			const repo = $("#urepo").value.trim() || firstRepo;
 			const branch = $("#ubranch").value.trim();
 			if (!(await ask("Update this server from " + repo + (branch ? " (" + branch + ")" : "") + " and restart it? Everyone is disconnected for a moment."))) return;
-			act(() => api("startSelfUpdate", { repo, branch }), "Updating…").then(route);
+			act(() => api("startSelfUpdate", { repo, branch, ...proof() }), "Updating…").then(route);
 		};
 		if ($("#uback")) $("#uback").onclick = async () => {
 			if (!(await ask("Go back to " + short(u.previous.sha) + " and restart? The database stays as it is."))) return;
-			act(() => api("rollbackSelfUpdate"), "Going back…").then(route);
+			act(() => api("rollbackSelfUpdate", proof()), "Going back…").then(route);
 		};
 		// follow a running update, and wait out the restart
 		if (going) setTimeout(function poll() {

@@ -20,7 +20,8 @@ import { setSetting, settings } from "./settings";
 import { clientIp, ipAllowed, parseRange } from "./staff-access";
 import { allows } from "./staff-permissions";
 import { checkForUpdate, updateStatus } from "./update-check";
-import { selfUpdateEnabled, selfUpdateStatus, startRollback, startSelfUpdate } from "./self-update";
+import { selfUpdateEnabled, selfUpdateReady, selfUpdateStatus, startRollback, startSelfUpdate, updateTarget } from "./self-update";
+import { reauthenticate } from "./superadmin";
 import { BACKUP_DIR, BACKUP_INTERVALS, MAX_BACKUPS_KEPT, createBackup, deleteBackup, listBackups } from "./backups";
 import { clientStatus, latestSha, rollbackClient, updateClient } from "./client-update";
 import { decideImport, pendingImports } from "./archive-import";
@@ -59,6 +60,14 @@ function lines(value: unknown, what: string, tags = false) {
 	const out = [...new Set((value as string[]).map((x) => x.trim().toLowerCase()).filter(Boolean))];
 	if (tags && out.some((x) => !/^#?[\p{L}\p{N}_]+$/u.test(x))) throw new AdminError("Trends must be hashtag names.");
 	return tags ? out.map((x) => x.replace(/^#/, "")) : out;
+}
+
+// swapping the server's code takes the password and a two-factor code again,
+// so a session left open somewhere isn't enough
+async function confirmIdentity(a: { id: string }, b: Record<string, unknown>) {
+	const [u] = await sql`select id::text, password_hash, totp_enabled from users where id = ${a.id}::bigint and instance is null`;
+	const refused = u ? await reauthenticate(u as { id: string; password_hash: string; totp_enabled: boolean }, b.password, b.code) : "Sign in with an account on this instance.";
+	if (refused) throw new AdminError(refused, 403);
 }
 
 // self-update.ts's refusals, shown to the admin as they are
@@ -662,6 +671,8 @@ export const toolActions: Record<string, Action> = {
 	startSelfUpdate: {
 		role: "admin",
 		run: async (a, b) => {
+			adminError(() => updateTarget(String(b.repo ?? ""), String(b.branch ?? "")));
+			await confirmIdentity(a, b);
 			const started = adminError(() => startSelfUpdate(a.screen_name, String(b.repo ?? ""), String(b.branch ?? "")));
 			await audit(a, "self_update", null, { repo: started.repo, branch: started.branch });
 			return {};
@@ -669,7 +680,9 @@ export const toolActions: Record<string, Action> = {
 	},
 	rollbackSelfUpdate: {
 		role: "admin",
-		run: async (a) => {
+		run: async (a, b) => {
+			adminError(selfUpdateReady);
+			await confirmIdentity(a, b);
 			const started = adminError(() => startRollback(a.screen_name));
 			await audit(a, "self_update_rollback", null, { branch: started.branch });
 			return {};

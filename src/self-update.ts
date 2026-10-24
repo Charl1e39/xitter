@@ -1,7 +1,8 @@
 // Admin > Server update: admins update a git checkout of Xitter from the panel,
 // from Xittered/xitter or any GitHub repository they name, without shell
 // access. Off unless SELF_UPDATE=on, since it runs whatever code that
-// repository holds as this server's user; SELF_UPDATE_REPOS limits which ones.
+// repository holds as this server's user. Only the update repository unless
+// SELF_UPDATE_REPOS names others, or is * for any.
 //
 // The steps are the ones an owner runs by hand: a database backup (backups.ts),
 // note the commit, point origin at the repository, fetch the branch, check it out
@@ -77,16 +78,25 @@ export function parseRepo(input: string): string | null {
 export const validBranch = (b: string) =>
 	/^[\w][\w./-]{0,99}$/.test(b) && !/\.\.|\/\/|\/\.|@\{|\.lock$|\/$|\.$/.test(b);
 
+// what an admin may update from. Unset, the update repository alone: with any
+// repository allowed, one phished admin account is arbitrary code on the server.
+// Not update_source, which an admin sets by updating.
+export function allowedRepos(): string[] | "*" {
+	const list = (process.env.SELF_UPDATE_REPOS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+	if (list.includes("*")) return "*";
+	return list.length ? list : [process.env.UPDATE_REPO || "Xittered/xitter"];
+}
+
 export function repoAllowed(repo: string) {
-	const list = (process.env.SELF_UPDATE_REPOS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-	return !list.length || list.includes(repo.toLowerCase());
+	const allowed = allowedRepos();
+	return allowed === "*" || allowed.some((x) => x.toLowerCase() === repo.toLowerCase());
 }
 
 export function selfUpdateStatus() {
 	return {
 		enabled: selfUpdateEnabled(),
 		checkout: isCheckout(),
-		allowed_repos: (process.env.SELF_UPDATE_REPOS ?? "").split(",").map((x) => x.trim()).filter(Boolean),
+		allowed_repos: allowedRepos(),
 		commit: COMMIT,
 		previous: saved.previous,
 		last: saved.last,
@@ -94,7 +104,8 @@ export function selfUpdateStatus() {
 	};
 }
 
-function ready() {
+// refuses before the password is asked for, so a switched-off instance doesn't use up tries
+export function selfUpdateReady() {
 	if (!selfUpdateEnabled()) throw new Error("Updating from the panel is off. The owner turns it on with SELF_UPDATE=on.");
 	if (!isCheckout()) throw new Error("This instance isn't a git checkout (a Docker image, say), so it updates on the server: git pull, then docker compose up -d --build.");
 	if (busy) throw new Error("An update is already running.");
@@ -221,14 +232,21 @@ async function updating(r: UpdateRun, url: string) {
 	restart(r);
 }
 
-// starts an update and returns while it runs; the panel follows it through selfUpdateStatus
-export function startSelfUpdate(by: string, repoInput: string, branchInput: string) {
-	ready();
-	const repo = parseRepo(repoInput || "Xittered/xitter");
+// the repository and branch an admin asked for, refused before their two-factor code is spent
+export function updateTarget(repoInput: string, branchInput: string) {
+	selfUpdateReady();
+	const allowed = allowedRepos();
+	const repo = parseRepo(repoInput || (allowed === "*" ? "Xittered/xitter" : allowed[0]));
 	if (!repo) throw new Error("Enter a GitHub repository like Xittered/xitter.");
 	if (!repoAllowed(repo)) throw new Error(`${repo} isn't one of the repositories this instance updates from (SELF_UPDATE_REPOS).`);
 	const branch = branchInput.trim() || null;
 	if (branch && !validBranch(branch)) throw new Error("That isn't a branch name.");
+	return { repo, branch };
+}
+
+// starts an update and returns while it runs; the panel follows it through selfUpdateStatus
+export function startSelfUpdate(by: string, repoInput: string, branchInput: string) {
+	const { repo, branch } = updateTarget(repoInput, branchInput);
 	const r = begin("update", by, repo, branch);
 	void updating(r, `https://github.com/${repo}.git`)
 		.catch((e) => fail(r, e))
@@ -239,7 +257,7 @@ export function startSelfUpdate(by: string, repoInput: string, branchInput: stri
 
 // the commit before the last update, with its dependencies; the database stays as it is
 export function startRollback(by: string) {
-	ready();
+	selfUpdateReady();
 	const prev = saved.previous;
 	if (!prev) throw new Error("There's no earlier commit to go back to.");
 	const r = begin("rollback", by, "", prev.branch);
