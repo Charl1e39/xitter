@@ -605,17 +605,19 @@ const RENDER = {
 	},
 
 	async backups(main) {
-		const { backups, schedule, dir } = await api("backups");
+		const { backups, schedule, intervals, max_keep, dir } = await api("backups");
+		const every = (h) => h === 1 ? "hour" : h === 24 ? "day" : h + " hours";
 		const size = (n) => n < 1048576 ? Math.ceil(n / 1024) + " KB" : (n / 1048576).toFixed(1) + " MB";
 		main.innerHTML = "<h1>Backups</h1>" +
 			'<p class="dim">Dumps of the database (pg_dump\'s custom format) in <span class="code">' + esc(dir) + '</span> on the server. Uploaded media and branding are files in media/ and data/: copy those directories too. To restore, stop the server and run <span class="code">pg_restore --clean --if-exists -d "$DATABASE_URL" &lt;file&gt;</span>.</p>' +
-			'<div class="box" style="margin-bottom:16px"><h2>Schedule</h2><div class="row schedule-controls"><label class="row"><input type="checkbox" id="bdaily"' + (schedule.daily ? " checked" : "") + '> Back up every day, keep the newest</label>' +
-			'<span class="number-stepper"><input id="bkeep" type="number" min="1" max="90" value="' + schedule.keep + '" aria-label="Number of backups to keep"><span class="step-buttons"><button type="button" id="bkeep-up" aria-label="Keep one more backup"><span class="arrow up"></span></button><button type="button" id="bkeep-down" aria-label="Keep one fewer backup"><span class="arrow down"></span></button></span></span><button class="btn" id="bsave">Save</button></div></div>' +
+			'<div class="box" style="margin-bottom:16px"><h2>Schedule</h2><div class="row schedule-controls"><label class="row"><input type="checkbox" id="bdaily"' + (schedule.daily ? " checked" : "") + '> Back up every</label>' +
+			'<select id="bevery" aria-label="How often to back up">' + intervals.map((h) => '<option value="' + h + '"' + (h === schedule.every_hours ? " selected" : "") + ">" + esc(every(h)) + "</option>").join("") + "</select>" +
+			'<span>, keep the newest</span><span class="number-stepper"><input id="bkeep" type="number" min="1" max="' + max_keep + '" value="' + schedule.keep + '" aria-label="Number of backups to keep"><span class="step-buttons"><button type="button" id="bkeep-up" aria-label="Keep one more backup"><span class="arrow up"></span></button><button type="button" id="bkeep-down" aria-label="Keep one fewer backup"><span class="arrow down"></span></button></span></span><button class="btn" id="bsave">Save</button></div></div>' +
 			'<div class="row" style="margin-bottom:16px"><button class="btn primary" id="bnow">Back up now</button></div>' +
 			'<div class="scroll">' + (backups.length ? '<table class="table"><tr><th>File</th><th>Size</th><th>Made</th><th></th></tr>' +
 				backups.map((b) => '<tr><td class="code">' + esc(b.name) + "</td><td>" + size(b.bytes) + '</td><td class="small dim">' + esc(when(b.created_at)) + '</td><td class="row"><a class="btn" href="/admin/backups/' + esc(b.name) + '" download>Download</a><button class="btn danger" data-del="' + esc(b.name) + '">Delete</button></td></tr>').join("") + "</table>"
 				: '<div class="empty">No backups yet.</div>') + "</div>";
-		$("#bsave").onclick = () => act(() => api("saveBackupSchedule", { daily: $("#bdaily").checked, keep: Number($("#bkeep").value) }), "Saved").then(route);
+		$("#bsave").onclick = () => act(() => api("saveBackupSchedule", { daily: $("#bdaily").checked, every_hours: Number($("#bevery").value), keep: Number($("#bkeep").value) }), "Saved").then(route);
 		const adjustKeep = (amount) => {
 			const input = $("#bkeep"), min = Number(input.min), max = Number(input.max);
 			input.value = String(Math.max(min, Math.min(max, (Number(input.value) || min) + amount)));
