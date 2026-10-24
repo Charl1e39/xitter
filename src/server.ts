@@ -14,6 +14,7 @@ import { cachedPatch, patchFile, patchText } from "./patch";
 import { clientError, recordError } from "./errors";
 import { asRequest, markStaff, setRequestLanguage, staffGate } from "./staff-access";
 import { backupPath, startBackups } from "./backups";
+import { startUpdateChecks } from "./update-check";
 import { memberInvitesRoute } from "./member-invites";
 import { orgRoute } from "./org-manage";
 import { menuLinks } from "./tidy";
@@ -41,9 +42,10 @@ import { gifProxy } from "./gifs";
 import { accountIndexRoute } from "./account-page";
 import { gifSettingsRoute } from "./gif-settings";
 import { classicDetailRoute, postCounts } from "./classic-detail";
+import { circleRoute } from "./circles";
 import { cardImage } from "./explore-cards";
 import { rememberIp, requestIp } from "./login-history";
-import { bucketsFor, hit, isMutation, limitApi, limitedResponse } from "./ratelimit";
+import { hit, isMutation, limitApi, limitedResponse } from "./ratelimit";
 import { actingViewer, delegateMay } from "./delegation";
 import { automationRoute } from "./automation";
 import { instancesRoute } from "./federation-settings";
@@ -74,6 +76,7 @@ import { forgetRanking } from "./ranking";
 import { cardsApi, payMeApi, recentApi } from "./money";
 import { merchantRoute, moneyRoute } from "./money-page";
 import { expireShopCheckmarks } from "./money-shop";
+import { restrictedPage, restrictedRefuses } from "./restricted-page";
 
 const MIME: Record<string, string> = {
 	js: "text/javascript; charset=utf-8",
@@ -109,10 +112,13 @@ async function servePublic(p: string): Promise<Response> {
 	if (hashflag) return hashflagAsset(hashflag[1], hashflag[2]);
 	const card = /^card-(\d{1,19})\.img$/.exec(name);
 	if (card) return cardImage(card[1]);
-	const flag = /^flag-([a-z]+)\.svg$/.exec(name);
+	const flag = /^flag-([a-z]+(?:-[a-z]{2})?)\.svg$/.exec(name);
 	if (flag) {
-		const svg = flagSvg(flag[1]);
-		return svg ? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } }) : new Response("not found", { status: 404 });
+		const svg = await flagSvg(flag[1]);
+		// a country's image is Twemoji's file: opened on its own, it may not run anything here
+		return svg
+			? new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'", "x-content-type-options": "nosniff" } })
+			: new Response("not found", { status: 404 });
 	}
 	if (!/^[\w.-]+\.(png|svg|ico|webp)$/.test(name)) return new Response("not found", { status: 404 });
 	// a logo uploaded in the admin panel replaces the shipped one
@@ -232,6 +238,8 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 		if (!delegateMay(acting.actor!.role, req.method, path, operation)) return apiError(403, 200, "Delegates can't do this for the account.");
 		viewer = acting;
 	}
+	if (viewer.status === "restricted" && restrictedRefuses(req.method, path, operation, url))
+		return apiError(403, 326, "Your account can't interact right now.");
 	// a follow, block, mute or like changes what "For you" would rank
 	if (req.method !== "GET") forgetRanking(viewer.id);
 	const limited = limitApi(viewer, req.method, path, operation, url);
@@ -254,8 +262,6 @@ async function serveApi(req: Request, url: URL, viewer: Viewer | undefined): Pro
 	if (path === "/xitter/money/recent") return recentApi(viewer);
 	if (path === "/xitter/money/payme" && req.method === "POST") return payMeApi(viewer);
 	if (path === "/xitter/client_error" && req.method === "POST") return clientError(req, viewer);
-	if (viewer.status === "restricted" && bucketsFor(req.method, path, operation, url).some((b) => b === "post" || b === "dm"))
-		return apiError(403, 326, "Your account can't post or send messages right now.");
 	if (req.method !== "GET" && !/^\/(i|1\.1)\/media\/upload2?\.json$/.test(path) && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY)
 		return apiError(413, 324, "That request is too large.");
 	if (process.env.LOG_REQUESTS) console.log(`api ${req.method} ${gql >= 0 ? `graphql:${parts[parts.length - 1]}` : path}`);
@@ -449,6 +455,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if (viewer?.role && !(await staffGate(req, viewer))) markStaff();
 	// a suspended account can't sign in, so it appeals here with its password
 	if (p === "/appeal") return appealRoute(req, server.requestIP(req)?.address ?? "");
+	if (p === "/account/access" && viewer?.status === "restricted") return restrictedPage(req, viewer);
 	// maintenance: staff carry on, everyone else signed in waits
 	if (viewer && !viewer.role && settings().operations.maintenance) {
 		if (API_PREFIX.test(p) || req.method !== "GET") return apiError(503, 130, settings().operations.message);
@@ -467,6 +474,7 @@ async function route(req: Request): Promise<Response | undefined> {
 	if ((p === "/account" || p === "/account/") && viewer) return accountIndexRoute(req, viewer);
 	if (p === "/account/gifs" && viewer) return gifSettingsRoute(req, viewer);
 	if (p === "/account/post-details" && viewer) return classicDetailRoute(req, viewer);
+	if (p === "/account/circle" && viewer) return circleRoute(req, viewer);
 	if (p === "/account/apps/developer" && viewer) return developerAppsRoute(req, viewer);
 	if (p === "/federation/superadmin" || p.startsWith("/federation/superadmin/")) return superadminHomeRoute(req, url, viewer);
 	if (p === "/account/reset") return resetRoute(req, url);
@@ -575,5 +583,6 @@ startScheduler();
 await startFederation();
 startMailDigests();
 startBackups();
+startUpdateChecks();
 startPush();
 console.log(`xitter listening on ${PUBLIC_ORIGIN}`);

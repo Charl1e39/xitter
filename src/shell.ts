@@ -128,6 +128,10 @@ const HOST_SWITCHES = ["responsive_web_media_upload_host"];
 const ownSwitches = (): Record<string, { value: unknown }> => ({
 	responsive_web_birdwatch_note_writing_enabled: { value: true },
 	responsive_web_pinned_replies_enabled: { value: true },
+	// Circles (circles.ts): the label on Circle posts stays even with the
+	// feature off; the composer sends its Circle choice only with the second
+	trusted_friends_consumption_enabled: { value: true },
+	super_follow_exclusive_tweet_creation_api_enabled: { value: feature("circles") },
 	composer_add_geo_network_conversation_controls: { value: true },
 	responsive_web_sidebar_ttf_enabled: { value: true },
 	// the side bar has one slot for both: History (its Bookmarks tab inside) when
@@ -332,7 +336,7 @@ ${user?.classic_post_details ? CLASSIC_DETAIL_CSS : ""}
 [data-testid="sidebarColumn"] div:has(> [data-testid="emptyState"]),[data-testid="sidebarColumn"] div:has(> div > aside) ~ div:empty{display:none}</style>
 </head><body><div id="react-root" style="height:100%;display:flex;"></div>
 <script>window.__INITIAL_STATE__=${inline(initialState(user, build.featureSwitch, inCommunity, educationFlags, accent))};window.__META_DATA__=${inline(meta)};</script>
-<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), ...pronounsData(user), classicDetail: !!user?.classic_post_details, tidy: tidyData(links), theme: clientTheme, look: clientLook(look, accent), accent: clientLook(look, accent).accent, themeColor: themeColorOf(accent), themePresets: swatches(), pageChrome: pageChromeCss(paint), steamMotion: steamMotion(paint), ...(user && csrf ? { csrf } : {}) })};</script>
+<script>window.__XITTER__=${inline({ ...flagPickerData(user?.flag ?? null), ...pronounsData(user), classicDetail: !!user?.classic_post_details, circles: !!user && feature("circles"), tidy: tidyData(links), theme: clientTheme, look: clientLook(look, accent), accent: clientLook(look, accent).accent, themeColor: themeColorOf(accent), themePresets: swatches(), pageChrome: pageChromeCss(paint), steamMotion: steamMotion(paint), ...(user && csrf ? { csrf } : {}) })};</script>
 <script src="${bootFor(!!user).path}"></script>
 <script id="nonce-csp"></script>
 <script>${runtimePatched.text}</script>

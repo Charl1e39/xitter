@@ -15,6 +15,14 @@ test("classic post details show the Likes tab and list to everyone", () => {
 	expect(() => new Function(patched)).not.toThrow();
 });
 
+test("the pinned build's Likes list shows to everyone who chose classic", () => {
+	const real = `C&&L.push(q("likes"));let K=a.useMemo(()=>{if("likes"===t&&!C)return(0,$.jsx)(h.A,{to:j});return null},[C,t])`;
+	const patched = patchText(real);
+	expect(patched).toContain('(C||window.__XITTER__?.classicDetail)&&L.push(q("likes"))');
+	expect(patched).toContain('if("likes"===t&&!C&&!window.__XITTER__?.classicDetail)return');
+	expect(() => new Function(patched)).not.toThrow();
+});
+
 test("the counts row script parses", () => {
 	expect(() => new Function(CLASSIC_DETAIL_SCRIPT)).not.toThrow();
 });

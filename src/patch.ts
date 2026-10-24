@@ -5,6 +5,7 @@ import { PUBLIC_HOSTNAME, PUBLIC_ORIGIN } from "./config";
 import { vapidPublicKey } from "./push";
 import { settings } from "./settings";
 import { patchCountryAudience } from "./reply-control-client";
+import { patchCircleComposer } from "./circles";
 
 // X's VAPID public key, which the client subscribes to push with; pushes can
 // only be signed with the private half, so the instance's own goes in its place
@@ -45,6 +46,8 @@ const RULES: [RegExp, string][] = [
 	// the post's author. isOwnPost itself stays, for what only the author gets.
 	[/([\w$]+)&&([\w$]+)\.push\(([\w$]+)\("likes"\)\)/g, '($1||window.__XITTER__?.classicDetail)&&$2.push($3("likes"))'],
 	[/"likes"!==([\w$]+)\|\|([\w$]+)\?"quotes"===/g, '"likes"!==$1||$2||window.__XITTER__?.classicDetail?"quotes"==='],
+	// the pinned build's shape of the same check: its Likes tab sends anyone but the author back to the post
+	[/if\("likes"===([\w$]+)&&!([\w$]+)\)return/g, 'if("likes"===$1&&!$2&&!window.__XITTER__?.classicDetail)return'],
 	// Chat is a separate app (module federation): its manifest comes from
 	// chat.x.com, its files from abs.twimg.com, and both are checked by pattern
 	[/https:\/\/chat\.x\.com\/embed-v1\.json/g, `${PUBLIC_ORIGIN}/xchat/embed-v1.json`],
@@ -164,8 +167,10 @@ export function patchText(text: string, chat = false): string {
 	let re: RegExp, to: string;
 	for ([re, to] of chat ? [...CHAT_RULES, ...RULES] : RULES) out = out.replace(re, to);
 	out = patchCountryAudience(out);
+	out = patchCircleComposer(out);
 	if (!out.includes("ConversationControlsQuery")) return out;
-	return out.replace(/function [\w$]+\(\{onApply:[\w$]+,onBack:[\w$]+,options:([\w$]+),value:[\w$]+\}\)\{let\[[\w$]+,[\w$]+\]=([\w$]+)\.useState\([\s\S]{0,16000}?(?=let [\w$]+=[\w$]+\.A\.create)/g, (picker, options, react) => {
+	// newer clients pass more props between options and value (requiresSelection:n=!1)
+	return out.replace(/function [\w$]+\(\{onApply:[\w$]+,onBack:[\w$]+,options:([\w$]+),(?:[\w$]+:[\w$]+(?:=[\w$!.]{1,20})?,){0,4}value:[\w$]+\}\)\{let\[[\w$]+,[\w$]+\]=([\w$]+)\.useState\([\s\S]{0,16000}?(?=let [\w$]+=[\w$]+\.A\.create)/g, (picker, options, react) => {
 		const jsx = /\(0,([\w$]+)\.jsxs\)/.exec(picker)?.[1];
 		if (!jsx) return picker;
 		return picker.replace(/\{let\[/, `{let[xitterCountrySearch,xitterSetCountrySearch]=${react}.useState(""),[`).replace('children:[', `children:[(0,${jsx}.jsx)("input",{type:"search","aria-label":"Search countries or regions",placeholder:"Search countries or regions",value:xitterCountrySearch,onChange:e=>xitterSetCountrySearch(e.target.value),style:{boxSizing:"border-box",width:"100%",padding:12,marginBottom:12,border:"1px solid currentColor",borderRadius:8,background:"transparent",color:"inherit",font:"inherit"}}),`).replace(`children:${options}.map`, `children:${options}.filter(e=>e.label.toLocaleLowerCase().includes(xitterCountrySearch.toLocaleLowerCase())||e.value.toLocaleLowerCase().includes(xitterCountrySearch.toLocaleLowerCase())).map`);
