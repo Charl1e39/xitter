@@ -19,7 +19,7 @@ import { blockedNameIn, blockedWordIn, suspendForName } from "./names";
 import { setSetting, settings } from "./settings";
 import { clientIp, ipAllowed, parseRange } from "./staff-access";
 import { allows } from "./staff-permissions";
-import { BACKUP_DIR, createBackup, deleteBackup, listBackups } from "./backups";
+import { BACKUP_DIR, BACKUP_INTERVALS, MAX_BACKUPS_KEPT, createBackup, deleteBackup, listBackups } from "./backups";
 import { clientStatus, latestSha, rollbackClient, updateClient } from "./client-update";
 import { decideImport, pendingImports } from "./archive-import";
 
@@ -644,7 +644,7 @@ export const toolActions: Record<string, Action> = {
 	},
 
 	// backups.ts; restoring is pg_restore on the server, not something done from a browser
-	backups: { role: "admin", run: async () => ({ backups: listBackups(), schedule: settings().backups, dir: BACKUP_DIR }) },
+	backups: { role: "admin", run: async () => ({ backups: listBackups(), schedule: settings().backups, intervals: BACKUP_INTERVALS, max_keep: MAX_BACKUPS_KEPT, dir: BACKUP_DIR }) },
 	createBackup: {
 		role: "admin",
 		run: async (a) => {
@@ -667,9 +667,11 @@ export const toolActions: Record<string, Action> = {
 		role: "admin",
 		run: async (a, b) => {
 			const keep = Number(b.keep);
-			if (typeof b.daily !== "boolean" || !Number.isInteger(keep) || keep < 1 || keep > 90) throw new AdminError("Keep 1 to 90 backups.");
-			await setSetting("backups", { daily: b.daily, keep });
-			await audit(a, "backup_schedule", null, { daily: b.daily, keep });
+			const every_hours = b.every_hours === undefined ? settings().backups.every_hours : Number(b.every_hours);
+			if (typeof b.daily !== "boolean" || !Number.isInteger(keep) || keep < 1 || keep > MAX_BACKUPS_KEPT) throw new AdminError(`Keep 1 to ${MAX_BACKUPS_KEPT} backups.`);
+			if (!BACKUP_INTERVALS.includes(every_hours)) throw new AdminError(`Back up every ${BACKUP_INTERVALS.join(", ")} hours.`);
+			await setSetting("backups", { daily: b.daily, keep, every_hours });
+			await audit(a, "backup_schedule", null, { daily: b.daily, keep, every_hours });
 			return {};
 		},
 	},
