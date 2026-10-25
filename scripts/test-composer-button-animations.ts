@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMPOSER_BUTTON_CSS } from "../src/composer-buttons";
+import { COMPOSER_BUTTON_CSS, COMPOSER_BUTTON_SCRIPT } from "../src/composer-buttons";
 
 const browserPath = process.env.BROWSER_BIN;
 if (!browserPath) throw new Error("Set BROWSER_BIN to a Chromium or Edge executable.");
@@ -118,7 +118,22 @@ try {
 		assert.equal((await state(index)).transform, "none");
 		assert.equal((await state(index)).transition, "0s");
 	}
-	console.log("Composer buttons: copied states, hover, press, rapid re-entry, disabled states, keyboard focus and reduced motion passed.");
+	await evaluate('document.body.innerHTML='+JSON.stringify('<style>'+COMPOSER_BUTTON_CSS+'</style><div data-testid="toolBar"><div data-testid="ScrollSnap-prevButtonWrapper"><button>Previous</button></div><div data-testid="ScrollSnap-List" style="display:flex;overflow:auto;width:120px"><button style="flex:0 0 100px">Native</button><button data-xitter-sticker style="flex:0 0 100px">Sticker</button><button data-xitter-pay style="flex:0 0 100px">Payment</button></div><div data-testid="ScrollSnap-nextButtonWrapper"><button>Next</button></div></div>')+';'+COMPOSER_BUTTON_SCRIPT);
+	await Bun.sleep(100);
+	assert.equal(await evaluate("document.querySelector('[data-testid=ScrollSnap-prevButtonWrapper]').dataset.xitterComposerScroll"),"hidden");
+	assert.equal(await evaluate("document.querySelector('[data-testid=ScrollSnap-nextButtonWrapper]').dataset.xitterComposerScroll"),"available");
+	await evaluate("document.querySelector('[data-testid=ScrollSnap-nextButtonWrapper] button').click()");
+	await Bun.sleep(100);
+	assert.ok(await evaluate("document.querySelector('[data-testid=ScrollSnap-List]').scrollLeft>0"));
+	for(index=0;index<5;index++)await evaluate("document.querySelector('[data-testid=ScrollSnap-nextButtonWrapper] button').click()");
+	await Bun.sleep(100);
+	assert.equal(await evaluate("document.querySelector('[data-testid=ScrollSnap-nextButtonWrapper]').dataset.xitterComposerScroll"),"hidden");
+	assert.equal(await evaluate("document.querySelector('[data-testid=ScrollSnap-prevButtonWrapper]').dataset.xitterComposerScroll"),"available");
+	await evaluate("document.querySelector('[data-testid=ScrollSnap-List]').style.width='400px'");
+	await Bun.sleep(100);
+	assert.equal(await evaluate("document.querySelector('[data-testid=ScrollSnap-nextButtonWrapper]').dataset.xitterComposerScroll"),"hidden");
+	assert.equal(await evaluate("document.querySelector('[data-testid=ScrollSnap-prevButtonWrapper]').dataset.xitterComposerScroll"),"hidden");
+	console.log("Composer buttons: animations, keyboard focus, reduced motion, scroll controls, overflow boundaries and resizing passed.");
 } finally {
 	socket?.close();
 	browser.kill();
